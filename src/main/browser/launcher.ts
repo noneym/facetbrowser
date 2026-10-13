@@ -120,11 +120,16 @@ class Launcher extends EventEmitter {
       // dozens of features (client hint frames, HTTPS upgrades, translate,
       // background networking...) and adds --no-sandbox, all of which make
       // the browser look automated. Only the two switches Playwright needs
-      // to talk to the process are kept.
+      // to talk to the process are kept. No flag from Chrome's "bad flags"
+      // list is used, so no warning bar appears.
       const args = [
         `--user-data-dir=${dir}`,
         '--remote-debugging-pipe',
+        // Clears navigator.webdriver (Chrome sets it for any remote debugging
+        // session). --test-type suppresses the "unsupported command-line flag"
+        // bar that this switch would otherwise trigger.
         '--disable-blink-features=AutomationControlled',
+        '--test-type',
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-search-engine-choice-screen',

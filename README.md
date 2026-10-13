@@ -21,7 +21,7 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 - Font list masked per operating system, media device counts, battery masking, Do Not Track
 - UA version is synced to the installed Chrome at launch, so client hints never contradict the UA string
 - `navigator.webdriver` false, no automation banner, native-looking overrides (`toString` returns `[native code]`)
-- Launch flags are kept to the bare minimum (no `--no-sandbox`, none of Playwright's `--disable-features` list). When the profile OS equals the host OS, Chrome sends its own user agent and client hints untouched; language comes from the profile preferences. Cross-OS profiles use a CDP user agent override and are less stealthy.
+- Launch flags are kept to the bare minimum (no `--no-sandbox`, none of Playwright's `--disable-features` list; `--test-type` keeps Chrome from showing the command-line warning bar). When the profile OS equals the host OS, Chrome sends its own user agent and client hints untouched; language comes from the profile preferences. Cross-OS profiles use a CDP user agent override and are less stealthy.
 
 **Account and cloud sync** (backed by [FacetBrowser-web](https://github.com/noneym/FacetBrowser-web))
 - Sign in or register inside the app; 14-day trial, lifetime Starter (15 profiles) and Unlimited licenses

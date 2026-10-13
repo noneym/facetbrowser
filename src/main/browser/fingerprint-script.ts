@@ -79,6 +79,8 @@ export function buildFingerprintScript(fp: Fingerprint, ctx: ScriptContext = {})
 
   // ---- navigator ---------------------------------------------------------
   const N = Navigator.prototype;
+  // navigator.webdriver is handled by the launch flag; a JS getter here would
+  // only add a detectable prototype change.
   if (C.uaOverride) {
     defineGetter(N, 'userAgent', C.userAgent);
     defineGetter(N, 'appVersion', C.userAgent.replace(/^Mozilla\\//, ''));
