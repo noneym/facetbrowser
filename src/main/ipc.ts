@@ -1,0 +1,338 @@
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import fs from 'fs'
+import type {
+  AppInfo, BatchCheckOptions, BatchItemEvent, CookieRecord, GenerateFingerprintOptions, Group, Profile,
+  ProfileExport, ProxyCheckResult, ProxyConfig, SavedProxy, Settings
+} from '@shared/types'
+import { store, uid } from './store'
+import { generateFingerprint, reseed } from './fingerprint/generator'
+import { COUNTRY_LOCALES, PROFILE_COLORS } from './fingerprint/data'
+import { launcher } from './browser/launcher'
+import { detectBrowser } from './browser/chrome-detect'
+import { checkProxy, pool } from './proxy/checker'
+import { parseProxyLine, parseProxyList } from './proxy/parse'
+
+function win(): BrowserWindow | null {
+  return BrowserWindow.getAllWindows()[0] || null
+}
+function send(channel: string, payload: unknown): void {
+  win()?.webContents.send(channel, payload)
+}
+
+function resolveProxy(profile: Profile): { config: ProxyConfig | null; info?: ProxyCheckResult } {
+  const s = store()
+  if (profile.proxy.mode === 'saved' && profile.proxy.savedId) {
+    const p = s.getProxy(profile.proxy.savedId)
+    if (!p) return { config: null }
+    return { config: { protocol: p.protocol, host: p.host, port: p.port, username: p.username, password: p.password }, info: p.lastCheck }
+  }
+  if (profile.proxy.mode === 'custom' && profile.proxy.custom) return { config: profile.proxy.custom }
+  return { config: null }
+}
+
+export function newProfile(partial: Partial<Profile> = {}): Profile {
+  const s = store()
+  const browser = detectBrowser(s.settings)
+  const now = Date.now()
+  const idx = s.profiles.length
+  return {
+    id: uid('p'),
+    name: `Profile ${idx + 1}`,
+    notes: '',
+    tags: [],
+    color: PROFILE_COLORS[idx % PROFILE_COLORS.length],
+    favorite: false,
+    proxy: { mode: 'none' },
+    fingerprint: generateFingerprint({ browserVersion: browser.version || undefined }),
+    startUrls: [],
+    extensions: [],
+    createdAt: now,
+    updatedAt: now,
+    launchCount: 0,
+    ...partial
+  }
+}
+
+export function registerIpc(): void {
+  const s = store()
+
+  // ---- app ---------------------------------------------------------------
+  ipcMain.handle('app:info', (): AppInfo => {
+    const b = detectBrowser(s.settings)
+    return { version: app.getVersion(), platform: process.platform, dataDir: app.getPath('userData'), browserFound: b.found, browserPath: b.path, browserVersion: b.version }
+  })
+  ipcMain.handle('app:openPath', (_e, p: string) => shell.openPath(p))
+  ipcMain.handle('app:openExternal', (_e, url: string) => shell.openExternal(url))
+  ipcMain.handle('app:pickFile', async (_e, opts: { title?: string; filters?: Electron.FileFilter[]; directory?: boolean }) => {
+    const r = await dialog.showOpenDialog(win()!, {
+      title: opts.title,
+      filters: opts.filters,
+      properties: opts.directory ? ['openDirectory'] : ['openFile']
+    })
+    return r.canceled ? null : r.filePaths[0]
+  })
+  ipcMain.handle('app:saveText', async (_e, opts: { defaultPath: string; content: string; filters?: Electron.FileFilter[] }) => {
+    const r = await dialog.showSaveDialog(win()!, { defaultPath: opts.defaultPath, filters: opts.filters })
+    if (r.canceled || !r.filePath) return null
+    fs.writeFileSync(r.filePath, opts.content, 'utf8')
+    return r.filePath
+  })
+  ipcMain.handle('app:readText', async (_e, opts: { filters?: Electron.FileFilter[] }) => {
+    const r = await dialog.showOpenDialog(win()!, { filters: opts.filters, properties: ['openFile'] })
+    if (r.canceled || !r.filePaths[0]) return null
+    return { path: r.filePaths[0], content: fs.readFileSync(r.filePaths[0], 'utf8') }
+  })
+
+  // ---- settings ---------------------------------------------------------
+  ipcMain.handle('settings:get', () => s.settings)
+  ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => s.setSettings(patch))
+
+  // ---- groups -----------------------------------------------------------
+  ipcMain.handle('groups:list', () => s.groups)
+  ipcMain.handle('groups:save', (_e, g: Group) => s.upsertGroup({ ...g, id: g.id || uid('g') }))
+  ipcMain.handle('groups:delete', (_e, id: string) => s.deleteGroup(id))
+
+  // ---- profiles ---------------------------------------------------------
+  ipcMain.handle('profiles:list', () => s.profiles)
+  ipcMain.handle('profiles:new', (_e, partial?: Partial<Profile>) => newProfile(partial))
+  ipcMain.handle('profiles:save', (_e, p: Profile) => s.upsertProfile(p))
+  ipcMain.handle('profiles:delete', async (_e, ids: string[], wipeData: boolean) => {
+    for (const id of ids) {
+      if (launcher.isRunning(id)) await launcher.stop(id)
+      const p = s.getProfile(id)
+      if (p && wipeData) launcher.deleteProfileData(p, s.settings)
+    }
+    s.deleteProfiles(ids)
+    return s.profiles
+  })
+  ipcMain.handle('profiles:clone', (_e, id: string, opts: { count: number; newFingerprint: boolean; copyData: boolean }) => {
+    const src = s.getProfile(id)
+    if (!src) throw new Error('Profile not found')
+    const created: Profile[] = []
+    for (let i = 0; i < Math.max(1, opts.count); i++) {
+      const clone: Profile = {
+        ...structuredClone(src),
+        id: uid('p'),
+        name: `${src.name} (copy${opts.count > 1 ? ' ' + (i + 1) : ''})`,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        launchCount: 0,
+        lastLaunchedAt: undefined,
+        favorite: false,
+        fingerprint: opts.newFingerprint ? generateFingerprint({ os: src.fingerprint.os, browserVersion: src.fingerprint.browserVersion }) : reseed(src.fingerprint)
+      }
+      if (opts.newFingerprint) {
+        clone.fingerprint.timezone = src.fingerprint.timezone
+        clone.fingerprint.geolocation = src.fingerprint.geolocation
+        clone.fingerprint.locale = src.fingerprint.locale
+        clone.fingerprint.languages = src.fingerprint.languages
+      }
+      if (opts.copyData) launcher.copyProfileData(src, clone, s.settings)
+      s.upsertProfile(clone)
+      created.push(clone)
+    }
+    return created
+  })
+  ipcMain.handle('profiles:export', async (_e, ids: string[]) => {
+    const set = new Set(ids)
+    const profiles = s.profiles.filter((p) => set.has(p.id))
+    const proxyIds = new Set(profiles.map((p) => p.proxy.savedId).filter(Boolean))
+    const payload: ProfileExport = {
+      version: 1,
+      exportedAt: Date.now(),
+      profiles,
+      proxies: s.proxies.filter((p) => proxyIds.has(p.id)),
+      groups: s.groups
+    }
+    const r = await dialog.showSaveDialog(win()!, { defaultPath: `facetbrowser-profiles-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: 'JSON', extensions: ['json'] }] })
+    if (r.canceled || !r.filePath) return null
+    fs.writeFileSync(r.filePath, JSON.stringify(payload, null, 2))
+    return r.filePath
+  })
+  ipcMain.handle('profiles:import', async () => {
+    const r = await dialog.showOpenDialog(win()!, { filters: [{ name: 'JSON', extensions: ['json'] }], properties: ['openFile'] })
+    if (r.canceled || !r.filePaths[0]) return 0
+    const payload = JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8')) as ProfileExport
+    let n = 0
+    for (const g of payload.groups || []) if (!s.groups.find((x) => x.id === g.id)) s.upsertGroup(g)
+    for (const p of payload.proxies || []) if (!s.getProxy(p.id)) s.upsertProxy(p)
+    for (const p of payload.profiles || []) {
+      const existing = s.getProfile(p.id)
+      s.upsertProfile(existing ? { ...p, id: uid('p'), name: `${p.name} (imported)` } : p)
+      n++
+    }
+    return n
+  })
+
+  // ---- fingerprint ------------------------------------------------------
+  ipcMain.handle('fingerprint:generate', (_e, opts: GenerateFingerprintOptions) => {
+    const browser = detectBrowser(s.settings)
+    return generateFingerprint({ browserVersion: browser.version || undefined, ...opts })
+  })
+  ipcMain.handle('fingerprint:adaptToProxy', (_e, profile: Profile) => {
+    const { info } = resolveProxy(profile)
+    if (!info || !info.countryCode) throw new Error('Proxy has no check result yet. Run a proxy check first.')
+    const loc = COUNTRY_LOCALES[info.countryCode]
+    const fp = { ...profile.fingerprint }
+    if (loc) {
+      fp.locale = loc.locale
+      fp.languages = loc.languages
+    }
+    if (info.timezone) fp.timezone = info.timezone
+    if (typeof info.lat === 'number' && typeof info.lon === 'number') fp.geolocation = { mode: 'custom', lat: info.lat, lon: info.lon, accuracy: 1500 }
+    return fp
+  })
+
+  // ---- browser ----------------------------------------------------------
+  launcher.on('status', (list) => send('browser:status', list))
+  ipcMain.handle('browser:list', () => launcher.list())
+  ipcMain.handle('browser:launch', async (_e, id: string) => {
+    const p = s.getProfile(id)
+    if (!p) throw new Error('Profile not found')
+    const { config, info } = resolveProxy(p)
+    await launcher.launch({ profile: p, proxy: config, proxyInfo: info, settings: s.settings })
+    p.launchCount = (p.launchCount || 0) + 1
+    p.lastLaunchedAt = Date.now()
+    s.upsertProfile(p)
+    return p
+  })
+  ipcMain.handle('browser:stop', (_e, id: string) => launcher.stop(id))
+  ipcMain.handle('browser:stopAll', () => launcher.stopAll())
+
+  // ---- cookies ----------------------------------------------------------
+  ipcMain.handle('cookies:export', async (_e, id: string) => {
+    const p = s.getProfile(id)
+    if (!p) throw new Error('Profile not found')
+    return launcher.exportCookies(p, s.settings)
+  })
+  ipcMain.handle('cookies:import', async (_e, id: string, text: string) => {
+    const p = s.getProfile(id)
+    if (!p) throw new Error('Profile not found')
+    const cookies = parseCookieText(text)
+    const n = await launcher.importCookies(p, s.settings, cookies)
+    p.cookieCount = await launcher.countCookies(p, s.settings).catch(() => n)
+    s.upsertProfile(p)
+    return n
+  })
+  ipcMain.handle('cookies:clear', async (_e, id: string) => {
+    const p = s.getProfile(id)
+    if (!p) throw new Error('Profile not found')
+    await launcher.clearCookies(p, s.settings)
+    p.cookieCount = 0
+    s.upsertProfile(p)
+  })
+
+  // ---- proxies ----------------------------------------------------------
+  ipcMain.handle('proxies:list', () => s.proxies)
+  ipcMain.handle('proxies:save', (_e, p: SavedProxy) => s.upsertProxy({ ...p, id: p.id || uid('x') }))
+  ipcMain.handle('proxies:delete', (_e, ids: string[]) => { s.deleteProxies(ids); return s.proxies })
+  ipcMain.handle('proxies:importText', (_e, text: string, tags: string[]) => {
+    const now = Date.now()
+    let n = 0
+    for (const { parsed } of parseProxyList(text)) {
+      if (!parsed) continue
+      const dup = s.proxies.find((p) => p.host === parsed.host && p.port === parsed.port && p.username === parsed.username && p.protocol === parsed.protocol)
+      if (dup) continue
+      s.upsertProxy({ ...parsed, id: uid('x'), name: '', tags: tags || [], createdAt: now, updatedAt: now })
+      n++
+    }
+    return { added: n, proxies: s.proxies }
+  })
+  ipcMain.handle('proxies:parse', (_e, line: string) => parseProxyLine(line))
+  ipcMain.handle('proxies:check', async (_e, ids: string[], opts?: { speedTest?: boolean }) => {
+    const targets = ids.map((id) => s.getProxy(id)).filter(Boolean) as SavedProxy[]
+    await pool(targets, s.settings.proxyCheckConcurrency || 5, async (p) => {
+      send('proxies:checking', { id: p.id, stage: 'connecting' })
+      const result = await checkProxy(p, {
+        contact: s.settings.getipintelContact,
+        abuseKey: s.settings.abuseIpDbKey,
+        speedTest: opts?.speedTest ?? true,
+        speedTestBytes: s.settings.speedTestBytes,
+        onStage: (stage) => send('proxies:checking', { id: p.id, stage })
+      })
+      const fresh = s.getProxy(p.id)
+      if (fresh) {
+        fresh.lastCheck = result
+        s.upsertProxy(fresh)
+      }
+      send('proxies:checked', { id: p.id, result })
+    })
+    return s.proxies
+  })
+  ipcMain.handle('proxies:checkConfig', (_e, cfg: ProxyConfig) =>
+    checkProxy(cfg, { contact: s.settings.getipintelContact, abuseKey: s.settings.abuseIpDbKey, speedTest: true, speedTestBytes: s.settings.speedTestBytes })
+  )
+
+  // ---- batch checker (proxy-checker port) ------------------------------
+  let batchAbort = false
+  ipcMain.handle('checker:run', async (_e, lines: string[], opts: BatchCheckOptions) => {
+    batchAbort = false
+    const items = lines.map((raw) => ({ raw, parsed: parseProxyLine(raw) }))
+    const emit = (ev: BatchItemEvent): void => send('checker:event', ev)
+    items.forEach((it, index) => emit({ index, raw: it.raw, stage: 'queued' }))
+    const results = await pool(items, Math.max(1, opts.concurrency || 5), async (it, index) => {
+      if (batchAbort) return null
+      if (!it.parsed) {
+        const result: ProxyCheckResult = { checkedAt: Date.now(), ok: false, error: 'Invalid format', quality: 0, grade: 'F', verdict: 'Invalid', issues: ['Invalid format'] }
+        emit({ index, raw: it.raw, stage: 'failed', result })
+        return result
+      }
+      emit({ index, raw: it.raw, stage: 'connecting' })
+      const result = await checkProxy(it.parsed, {
+        contact: opts.contact,
+        abuseKey: opts.abuseKey,
+        skipReportedForIntel: opts.skipReported,
+        speedTest: opts.speedTest,
+        speedTestBytes: s.settings.speedTestBytes,
+        onStage: (stage) => emit({ index, raw: it.raw, stage })
+      })
+      emit({ index, raw: it.raw, stage: result.ok ? 'done' : 'failed', result })
+      return result
+    })
+    return results
+  })
+  ipcMain.handle('checker:abort', () => { batchAbort = true })
+}
+
+// Accepts Playwright/Puppeteer JSON arrays, EditThisCookie exports, or Netscape cookies.txt.
+export function parseCookieText(text: string): CookieRecord[] {
+  const t = text.trim()
+  if (t.startsWith('[') || t.startsWith('{')) {
+    const json = JSON.parse(t)
+    const arr = Array.isArray(json) ? json : Array.isArray(json.cookies) ? json.cookies : []
+    return arr.map((c: Record<string, unknown>) => ({
+      name: String(c.name ?? ''),
+      value: String(c.value ?? ''),
+      domain: String(c.domain ?? ''),
+      path: String(c.path ?? '/'),
+      expires: typeof c.expires === 'number' ? c.expires : typeof c.expirationDate === 'number' ? c.expirationDate : -1,
+      httpOnly: !!c.httpOnly,
+      secure: !!c.secure,
+      sameSite: normaliseSameSite(c.sameSite)
+    }))
+  }
+  const out: CookieRecord[] = []
+  for (const line of t.split(/\r?\n/)) {
+    if (!line || line.startsWith('#')) continue
+    const parts = line.split('\t')
+    if (parts.length < 7) continue
+    out.push({
+      domain: parts[0],
+      path: parts[2],
+      secure: parts[3].toUpperCase() === 'TRUE',
+      expires: parseInt(parts[4], 10) || -1,
+      name: parts[5],
+      value: parts[6],
+      httpOnly: parts[0].startsWith('#HttpOnly_'),
+      sameSite: 'Lax'
+    })
+  }
+  return out
+}
+
+function normaliseSameSite(v: unknown): 'Strict' | 'Lax' | 'None' {
+  const s = String(v ?? '').toLowerCase()
+  if (s === 'strict') return 'Strict'
+  if (s === 'none' || s === 'no_restriction') return 'None'
+  return 'Lax'
+}

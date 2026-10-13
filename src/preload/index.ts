@@ -1,0 +1,76 @@
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import type {
+  AppInfo, BatchCheckOptions, BatchItemEvent, CookieRecord, Fingerprint, GenerateFingerprintOptions, Group, Profile,
+  ProxyCheckResult, ProxyConfig, RunningProfile, SavedProxy, Settings
+} from '@shared/types'
+
+type Listener<T> = (payload: T) => void
+function on<T>(channel: string, cb: Listener<T>): () => void {
+  const handler = (_e: IpcRendererEvent, payload: T): void => cb(payload)
+  ipcRenderer.on(channel, handler)
+  return () => ipcRenderer.removeListener(channel, handler)
+}
+
+const api = {
+  app: {
+    info: (): Promise<AppInfo> => ipcRenderer.invoke('app:info'),
+    openPath: (p: string): Promise<string> => ipcRenderer.invoke('app:openPath', p),
+    openExternal: (url: string): Promise<void> => ipcRenderer.invoke('app:openExternal', url),
+    pickFile: (opts: { title?: string; filters?: { name: string; extensions: string[] }[]; directory?: boolean }): Promise<string | null> => ipcRenderer.invoke('app:pickFile', opts),
+    saveText: (opts: { defaultPath: string; content: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> => ipcRenderer.invoke('app:saveText', opts),
+    readText: (opts: { filters?: { name: string; extensions: string[] }[] }): Promise<{ path: string; content: string } | null> => ipcRenderer.invoke('app:readText', opts)
+  },
+  settings: {
+    get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
+    set: (patch: Partial<Settings>): Promise<Settings> => ipcRenderer.invoke('settings:set', patch)
+  },
+  groups: {
+    list: (): Promise<Group[]> => ipcRenderer.invoke('groups:list'),
+    save: (g: Group): Promise<Group> => ipcRenderer.invoke('groups:save', g),
+    delete: (id: string): Promise<void> => ipcRenderer.invoke('groups:delete', id)
+  },
+  profiles: {
+    list: (): Promise<Profile[]> => ipcRenderer.invoke('profiles:list'),
+    new: (partial?: Partial<Profile>): Promise<Profile> => ipcRenderer.invoke('profiles:new', partial),
+    save: (p: Profile): Promise<Profile> => ipcRenderer.invoke('profiles:save', p),
+    delete: (ids: string[], wipeData: boolean): Promise<Profile[]> => ipcRenderer.invoke('profiles:delete', ids, wipeData),
+    clone: (id: string, opts: { count: number; newFingerprint: boolean; copyData: boolean }): Promise<Profile[]> => ipcRenderer.invoke('profiles:clone', id, opts),
+    export: (ids: string[]): Promise<string | null> => ipcRenderer.invoke('profiles:export', ids),
+    import: (): Promise<number> => ipcRenderer.invoke('profiles:import')
+  },
+  fingerprint: {
+    generate: (opts: GenerateFingerprintOptions): Promise<Fingerprint> => ipcRenderer.invoke('fingerprint:generate', opts),
+    adaptToProxy: (p: Profile): Promise<Fingerprint> => ipcRenderer.invoke('fingerprint:adaptToProxy', p)
+  },
+  browser: {
+    list: (): Promise<RunningProfile[]> => ipcRenderer.invoke('browser:list'),
+    launch: (id: string): Promise<Profile> => ipcRenderer.invoke('browser:launch', id),
+    stop: (id: string): Promise<void> => ipcRenderer.invoke('browser:stop', id),
+    stopAll: (): Promise<void> => ipcRenderer.invoke('browser:stopAll'),
+    onStatus: (cb: Listener<RunningProfile[]>) => on('browser:status', cb)
+  },
+  cookies: {
+    export: (id: string): Promise<CookieRecord[]> => ipcRenderer.invoke('cookies:export', id),
+    import: (id: string, text: string): Promise<number> => ipcRenderer.invoke('cookies:import', id, text),
+    clear: (id: string): Promise<void> => ipcRenderer.invoke('cookies:clear', id)
+  },
+  proxies: {
+    list: (): Promise<SavedProxy[]> => ipcRenderer.invoke('proxies:list'),
+    save: (p: SavedProxy): Promise<SavedProxy> => ipcRenderer.invoke('proxies:save', p),
+    delete: (ids: string[]): Promise<SavedProxy[]> => ipcRenderer.invoke('proxies:delete', ids),
+    importText: (text: string, tags: string[]): Promise<{ added: number; proxies: SavedProxy[] }> => ipcRenderer.invoke('proxies:importText', text, tags),
+    parse: (line: string): Promise<ProxyConfig | null> => ipcRenderer.invoke('proxies:parse', line),
+    check: (ids: string[], opts?: { speedTest?: boolean }): Promise<SavedProxy[]> => ipcRenderer.invoke('proxies:check', ids, opts),
+    checkConfig: (cfg: ProxyConfig): Promise<ProxyCheckResult> => ipcRenderer.invoke('proxies:checkConfig', cfg),
+    onChecking: (cb: Listener<{ id: string; stage: string }>) => on('proxies:checking', cb),
+    onChecked: (cb: Listener<{ id: string; result: ProxyCheckResult }>) => on('proxies:checked', cb)
+  },
+  checker: {
+    run: (lines: string[], opts: BatchCheckOptions): Promise<(ProxyCheckResult | null)[]> => ipcRenderer.invoke('checker:run', lines, opts),
+    abort: (): Promise<void> => ipcRenderer.invoke('checker:abort'),
+    onEvent: (cb: Listener<BatchItemEvent>) => on('checker:event', cb)
+  }
+}
+
+export type Api = typeof api
+contextBridge.exposeInMainWorld('api', api)

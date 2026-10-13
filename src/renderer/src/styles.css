@@ -1,0 +1,114 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+/* One dark theme, locked. Neutral base with a single mint accent. */
+@theme {
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'Cascadia Code', Consolas, monospace;
+
+  --color-bg: #0b0d10;
+  --color-surface: #111419;
+  --color-surface-2: #161a20;
+  --color-surface-3: #1c2129;
+  --color-line: #232830;
+  --color-line-strong: #2f3641;
+  --color-fg: #e6e9ee;
+  --color-fg-muted: #8b949e;
+  --color-fg-faint: #5c6673;
+
+  --color-accent: #3ecf8e;
+  --color-accent-strong: #2fb97a;
+  --color-accent-ink: #06130c;
+
+  --color-ok: #3ecf8e;
+  --color-good: #9ccc3c;
+  --color-warn: #e5a33d;
+  --color-risk: #e8783a;
+  --color-bad: #e35d5d;
+  --color-info: #5b9cf6;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+input, textarea, select, button {
+  font: inherit;
+  color: inherit;
+}
+
+textarea, input {
+  user-select: text;
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a3039;
+  border-radius: 10px;
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #39414d;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+  outline-offset: 1px;
+}
+
+@keyframes fb-shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--color-surface-2) 0%, var(--color-surface-3) 50%, var(--color-surface-2) 100%);
+  background-size: 200% 100%;
+  animation: fb-shimmer 1.6s linear infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes fb-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.live-dot {
+  animation: fb-pulse-dot 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton, .live-dot { animation: none; }
+}

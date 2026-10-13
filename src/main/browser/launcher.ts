@@ -1,0 +1,238 @@
+import { chromium, type BrowserContext } from 'playwright-core'
+import fs from 'fs'
+import path from 'path'
+import { EventEmitter } from 'events'
+import type { CookieRecord, Profile, ProxyConfig, ProxyCheckResult, RunningProfile, Settings } from '@shared/types'
+import { buildFingerprintScript } from './fingerprint-script'
+import { startBridge, type Bridge } from '../proxy/bridge'
+import { detectBrowser } from './chrome-detect'
+
+interface Running {
+  context: BrowserContext
+  bridge: Bridge | null
+  startedAt: number
+  state: RunningProfile['state']
+}
+
+export interface LaunchInput {
+  profile: Profile
+  proxy: ProxyConfig | null
+  proxyInfo?: ProxyCheckResult
+  settings: Settings
+}
+
+class Launcher extends EventEmitter {
+  private running = new Map<string, Running>()
+
+  list(): RunningProfile[] {
+    return [...this.running.entries()].map(([profileId, r]) => ({
+      profileId,
+      state: r.state,
+      startedAt: r.startedAt,
+      bridgePort: r.bridge?.port,
+      pages: r.state === 'running' ? safePages(r.context) : 0
+    }))
+  }
+
+  isRunning(id: string): boolean {
+    return this.running.has(id)
+  }
+
+  private emitStatus(): void {
+    this.emit('status', this.list())
+  }
+
+  userDataDir(profile: Profile, settings: Settings): string {
+    return path.join(settings.profilesDir, profile.id)
+  }
+
+  async launch(input: LaunchInput): Promise<void> {
+    const { profile, proxy, proxyInfo, settings } = input
+    if (this.running.has(profile.id)) throw new Error('Profile is already running')
+
+    const browser = detectBrowser(settings)
+    if (!browser.found) throw new Error('No Chromium-based browser found. Set a browser path in Settings.')
+
+    const dir = this.userDataDir(profile, settings)
+    fs.mkdirSync(dir, { recursive: true })
+
+    let bridge: Bridge | null = null
+    if (proxy) bridge = await startBridge(proxy)
+
+    const placeholder: Running = { context: null as unknown as BrowserContext, bridge, startedAt: Date.now(), state: 'starting' }
+    this.running.set(profile.id, placeholder)
+    this.emitStatus()
+
+    try {
+      const fp = profile.fingerprint
+      const major = (browser.version || fp.browserVersion).split('.')[0]
+      // Keep the UA major version equal to the real engine so client hints,
+      // feature detection and the UA string never contradict each other.
+      const userAgent = fp.userAgent.replace(/Chrome\/\d+(\.\d+)*/, `Chrome/${major}.0.0.0`)
+
+      const timezoneId = fp.timezone === 'auto' ? proxyInfo?.timezone || undefined : fp.timezone
+      let geolocation: { latitude: number; longitude: number; accuracy?: number } | undefined
+      if (fp.geolocation.mode === 'custom' && typeof fp.geolocation.lat === 'number' && typeof fp.geolocation.lon === 'number') {
+        geolocation = { latitude: fp.geolocation.lat, longitude: fp.geolocation.lon, accuracy: fp.geolocation.accuracy ?? 100 }
+      } else if (fp.geolocation.mode === 'auto' && typeof proxyInfo?.lat === 'number' && typeof proxyInfo?.lon === 'number') {
+        geolocation = { latitude: proxyInfo.lat, longitude: proxyInfo.lon, accuracy: 1500 }
+      }
+
+      const args = [
+        '--disable-blink-features=AutomationControlled',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-features=TranslateUI,IdleDetection,OptimizationHints',
+        `--lang=${fp.locale}`,
+        `--window-size=${Math.min(fp.screen.width, 1600)},${Math.min(fp.screen.height, 1000)}`
+      ]
+      if (bridge) {
+        args.push(`--proxy-server=http://127.0.0.1:${bridge.port}`)
+        args.push('--proxy-bypass-list=<-loopback>')
+        if (fp.webrtc !== 'real') args.push('--force-webrtc-ip-handling-policy=disable_non_proxied_udp')
+      }
+      const extensions = profile.extensions.filter((e) => e && fs.existsSync(e))
+      if (extensions.length) {
+        args.push(`--disable-extensions-except=${extensions.join(',')}`)
+        args.push(`--load-extension=${extensions.join(',')}`)
+      }
+
+      const context = await chromium.launchPersistentContext(dir, {
+        executablePath: browser.path,
+        headless: false,
+        viewport: null,
+        userAgent,
+        locale: fp.locale,
+        timezoneId,
+        geolocation,
+        permissions: geolocation ? ['geolocation'] : [],
+        ignoreDefaultArgs: ['--enable-automation', '--disable-extensions', '--disable-component-extensions-with-background-pages'],
+        args,
+        ignoreHTTPSErrors: false,
+        bypassCSP: false,
+        serviceWorkers: 'allow'
+      })
+
+      await context.addInitScript(buildFingerprintScript(fp, { publicIp: proxyInfo?.ip }))
+
+      const entry: Running = { context, bridge, startedAt: Date.now(), state: 'running' }
+      this.running.set(profile.id, entry)
+      context.on('close', () => this.cleanup(profile.id))
+
+      const urls = profile.startUrls.filter(Boolean)
+      if (!urls.length && settings.defaultStartUrl) urls.push(settings.defaultStartUrl)
+      const pages = context.pages()
+      for (let i = 0; i < urls.length; i++) {
+        const page = i === 0 && pages[0] ? pages[0] : await context.newPage()
+        page.goto(urls[i]).catch(() => {})
+      }
+      this.emitStatus()
+    } catch (e) {
+      await bridge?.close()
+      this.running.delete(profile.id)
+      this.emitStatus()
+      throw e
+    }
+  }
+
+  private async cleanup(profileId: string): Promise<void> {
+    const r = this.running.get(profileId)
+    if (!r) return
+    this.running.delete(profileId)
+    await r.bridge?.close().catch(() => {})
+    this.emit('closed', profileId)
+    this.emitStatus()
+  }
+
+  async stop(profileId: string): Promise<void> {
+    const r = this.running.get(profileId)
+    if (!r) return
+    r.state = 'stopping'
+    this.emitStatus()
+    try {
+      await r.context?.close()
+    } catch {
+      /* ignore */
+    }
+    await this.cleanup(profileId)
+  }
+
+  async stopAll(): Promise<void> {
+    await Promise.all([...this.running.keys()].map((id) => this.stop(id)))
+  }
+
+  // ---- cookies ---------------------------------------------------------
+  // While a profile runs we talk to the live context. Otherwise the profile
+  // directory is opened in a short-lived headless context.
+  private async withContext<T>(profile: Profile, settings: Settings, fn: (ctx: BrowserContext) => Promise<T>): Promise<T> {
+    const live = this.running.get(profile.id)
+    if (live && live.state === 'running') return fn(live.context)
+    const browser = detectBrowser(settings)
+    if (!browser.found) throw new Error('No browser found')
+    const dir = this.userDataDir(profile, settings)
+    fs.mkdirSync(dir, { recursive: true })
+    const ctx = await chromium.launchPersistentContext(dir, {
+      executablePath: browser.path,
+      headless: true,
+      args: ['--no-first-run', '--no-default-browser-check'],
+      ignoreDefaultArgs: ['--enable-automation']
+    })
+    try {
+      return await fn(ctx)
+    } finally {
+      await ctx.close().catch(() => {})
+    }
+  }
+
+  async exportCookies(profile: Profile, settings: Settings): Promise<CookieRecord[]> {
+    return this.withContext(profile, settings, async (ctx) => (await ctx.cookies()) as CookieRecord[])
+  }
+
+  async importCookies(profile: Profile, settings: Settings, cookies: CookieRecord[]): Promise<number> {
+    return this.withContext(profile, settings, async (ctx) => {
+      const clean = cookies
+        .filter((c) => c.name && c.domain)
+        .map((c) => ({
+          name: c.name,
+          value: String(c.value ?? ''),
+          domain: c.domain,
+          path: c.path || '/',
+          expires: typeof c.expires === 'number' && c.expires > 0 ? c.expires : -1,
+          httpOnly: !!c.httpOnly,
+          secure: !!c.secure,
+          sameSite: (['Strict', 'Lax', 'None'].includes(c.sameSite) ? c.sameSite : 'Lax') as 'Strict' | 'Lax' | 'None'
+        }))
+      await ctx.addCookies(clean)
+      return clean.length
+    })
+  }
+
+  async clearCookies(profile: Profile, settings: Settings): Promise<void> {
+    await this.withContext(profile, settings, async (ctx) => ctx.clearCookies())
+  }
+
+  async countCookies(profile: Profile, settings: Settings): Promise<number> {
+    return this.withContext(profile, settings, async (ctx) => (await ctx.cookies()).length)
+  }
+
+  deleteProfileData(profile: Profile, settings: Settings): void {
+    const dir = this.userDataDir(profile, settings)
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true })
+  }
+
+  copyProfileData(src: Profile, dst: Profile, settings: Settings): void {
+    const from = this.userDataDir(src, settings)
+    const to = this.userDataDir(dst, settings)
+    if (fs.existsSync(from)) fs.cpSync(from, to, { recursive: true, filter: (p) => !/(Singleton|lockfile|\.lock$|Crashpad|GPUCache|Code Cache)/i.test(p) })
+  }
+}
+
+function safePages(ctx: BrowserContext): number {
+  try {
+    return ctx.pages().length
+  } catch {
+    return 0
+  }
+}
+
+export const launcher = new Launcher()
