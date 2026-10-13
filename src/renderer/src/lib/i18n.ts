@@ -370,6 +370,7 @@ const dict = {
   'prov.balance': ['Bakiye', 'Balance'],
   'prov.generate': ['Proxy üret', 'Generate proxies'],
   'prov.country': ['Ülke', 'Country'],
+  'prov.protocol': ['Protokol', 'Protocol'],
   'prov.anyCountry': ['Fark etmez', 'Any'],
   'prov.count': ['Adet', 'Count'],
   'prov.sticky': ['Sabit oturum (aynı IP)', 'Sticky session (same IP)'],

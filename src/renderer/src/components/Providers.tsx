@@ -5,7 +5,7 @@ import type { SavedProxy } from '@shared/types'
 import { useApp } from '@/store/app'
 import { useT } from '@/lib/i18n'
 import { toast, errMsg } from '@/store/toast'
-import { Button, Field, Input, Modal, Select, Toggle, IconButton, Spinner, cx } from '@/components/ui'
+import { Button, Field, Input, Modal, Select, Toggle, IconButton, Spinner, Segmented, cx } from '@/components/ui'
 
 type Meta = Awaited<ReturnType<typeof window.api.providers.meta>>[number]
 
@@ -141,6 +141,8 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
   const [count, setCount] = useState(single ? 1 : 5)
   const [sticky, setSticky] = useState(true)
   const [ttl, setTtl] = useState(24)
+  const [protocol, setProtocol] = useState<'http' | 'socks5'>(() => (localStorage.getItem('prov.protocol') === 'socks5' ? 'socks5' : 'http'))
+  useEffect(() => { localStorage.setItem('prov.protocol', protocol) }, [protocol])
   const [busy, setBusy] = useState(false)
   useEffect(() => {
     if (!acc) return
@@ -151,7 +153,7 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
     if (!acc) return
     setBusy(true)
     try {
-      const r = await window.api.providers.generate(acc.id, { country: country || undefined, count: single ? 1 : count, sticky, ttlHours: ttl }, true)
+      const r = await window.api.providers.generate(acc.id, { protocol, country: country || undefined, count: single ? 1 : count, sticky, ttlHours: ttl }, true)
       setProxies(await window.api.proxies.list())
       toast.ok(t('prov.generated', { n: r.saved.length }))
       onGenerated?.(r.saved)
@@ -166,6 +168,9 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
     <Modal open={!!acc} onClose={onClose} title={`${t('prov.generate')}: ${acc?.label || ''}`} width={460}
       footer={<><Button onClick={onClose}>{t('common.cancel')}</Button><Button variant="primary" loading={busy} onClick={run} icon={<Lightning size={14} weight="fill" />}>{t('prov.generate')}</Button></>}>
       <div className="flex flex-col gap-4">
+        <Field label={t('prov.protocol')}>
+          <Segmented<'http' | 'socks5'> value={protocol} onChange={setProtocol} options={[{ id: 'http', label: 'HTTP' }, { id: 'socks5', label: 'SOCKS5' }]} />
+        </Field>
         <Field label={t('prov.country')}>
           {countries.length ? (
             <Select value={country} onChange={(e) => setCountry(e.target.value)}>

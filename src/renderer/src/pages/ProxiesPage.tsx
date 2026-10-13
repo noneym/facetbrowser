@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Plus, Globe, ArrowsClockwise, Trash, Copy, CaretRight, MagnifyingGlass } from '@phosphor-icons/react'
-import type { ProxyCheckResult, SavedProxy } from '@shared/types'
+import type { ProxyCheckResult, ProxyProtocol, SavedProxy } from '@shared/types'
 import { useApp } from '@/store/app'
 import { useT, type Key } from '@/lib/i18n'
 import { toast, errMsg } from '@/store/toast'
@@ -143,7 +143,8 @@ export function ProxiesPage(): JSX.Element {
                 const open = expanded === p.id
                 return (
                   <ProxyRow key={p.id} p={p} r={r} stage={stage} open={open} selected={selected.has(p.id)} usedBy={usage.get(p.id) || 0}
-                    onToggle={(v) => toggle(p.id, v)} onExpand={() => setExpanded(open ? null : p.id)} onCheck={() => check([p.id])} onCopy={() => copy(p)} onDelete={() => setDeleteIds([p.id])} />
+                    onToggle={(v) => toggle(p.id, v)} onExpand={() => setExpanded(open ? null : p.id)} onCheck={() => check([p.id])} onCopy={() => copy(p)} onDelete={() => setDeleteIds([p.id])}
+                    onProtocol={async (protocol) => { await window.api.proxies.save({ ...p, protocol }); setProxies(await window.api.proxies.list()) }} />
                 )
               })}
             </tbody>
@@ -164,7 +165,7 @@ export function ProxiesPage(): JSX.Element {
 
 function ProxyRow({ p, r, stage, open, selected, usedBy, onToggle, onExpand, onCheck, onCopy, onDelete }: {
   p: SavedProxy; r?: ProxyCheckResult; stage?: string; open: boolean; selected: boolean; usedBy: number
-  onToggle: (v: boolean) => void; onExpand: () => void; onCheck: () => void; onCopy: () => void; onDelete: () => void
+  onToggle: (v: boolean) => void; onExpand: () => void; onCheck: () => void; onCopy: () => void; onDelete: () => void; onProtocol: (p: ProxyProtocol) => void
 }): JSX.Element {
   const t = useT()
   return (
@@ -177,7 +178,9 @@ function ProxyRow({ p, r, stage, open, selected, usedBy, onToggle, onExpand, onC
             <div className="min-w-0">
               <div className="truncate font-mono text-[12.5px]">{p.name || proxyShort(p)}</div>
               <div className="flex items-center gap-1.5 text-[11px] text-fg-faint">
-                <span className="uppercase">{p.protocol}</span>
+                <select value={p.protocol} onClick={(e) => e.stopPropagation()} onChange={(e) => onProtocol(e.target.value as ProxyProtocol)} title={t('editor.proxy.protocol')} className="focus-ring cursor-pointer appearance-none rounded border border-transparent bg-transparent uppercase text-fg-faint hover:border-line hover:text-fg">
+                  {(['http', 'https', 'socks5', 'socks4'] as ProxyProtocol[]).map((x) => <option key={x} value={x}>{x}</option>)}
+                </select>
                 {p.username && <span>· auth</span>}
                 {usedBy > 0 && <span>· {t('proxies.usedBy', { n: usedBy })}</span>}
                 {p.tags.map((x) => <Badge key={x}>{x}</Badge>)}

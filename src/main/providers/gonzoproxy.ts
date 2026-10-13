@@ -86,7 +86,7 @@ export const gonzoproxy: ProviderAdapter = {
     if (acc.credentials.password) body.password = acc.credentials.password
     try {
       const r = await call<{ proxies?: string[] }>(acc, '/proxy-api/generate', 'POST', body)
-      const parsed = (r.proxies || []).map((s) => parseProxyLine(s, 'http')).filter((p): p is ProxyConfig => !!p)
+      const parsed = (r.proxies || []).map((s) => parseProxyLine(s, 'http')).filter((p): p is ProxyConfig => !!p).map((p) => ({ ...p, protocol: opts.protocol || 'http' }))
       if (parsed.length) return parsed
       throw new Error('GonzoProxy: generator returned no proxies')
     } catch (e) {
@@ -95,7 +95,7 @@ export const gonzoproxy: ProviderAdapter = {
       const out: ProxyConfig[] = []
       for (let i = 0; i < count; i++) {
         const sid = Math.random().toString(36).slice(2, 10)
-        out.push({ protocol: 'http', host: GATEWAY, port: GATEWAY_PORT, username: buildUsername(acc.credentials.login, opts, sid), password: acc.credentials.password })
+        out.push({ protocol: opts.protocol || 'http', host: GATEWAY, port: GATEWAY_PORT, username: buildUsername(acc.credentials.login, opts, sid), password: acc.credentials.password })
       }
       return out
     }

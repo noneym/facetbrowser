@@ -33,8 +33,7 @@ export const twocaptcha: ProviderAdapter = {
     { key: 'username', label: 'Proxy login', hint: 'From 2captcha.com/proxy, e.g. uce...-zone-custom' },
     { key: 'password', label: 'Proxy password', secret: true },
     { key: 'host', label: 'Gateway host', hint: `Default ${DEFAULT_HOST}`, optional: true },
-    { key: 'port', label: 'Gateway port', hint: `Default ${DEFAULT_PORT}`, optional: true },
-    { key: 'protocol', label: 'Protocol (http or socks5)', optional: true }
+    { key: 'port', label: 'Gateway port', hint: `Default ${DEFAULT_PORT}`, optional: true }
   ],
 
   async balance(acc): Promise<ProviderBalance> {
@@ -66,7 +65,7 @@ export const twocaptcha: ProviderAdapter = {
     if (!username || !password) throw new Error('2Captcha: store the proxy login and password from 2captcha.com/proxy first')
     const host = acc.credentials.host || DEFAULT_HOST
     const port = parseInt(acc.credentials.port || DEFAULT_PORT, 10)
-    const protocol = (acc.credentials.protocol || 'http').toLowerCase() === 'socks5' ? 'socks5' : 'http'
+    const protocol = opts.protocol || ((acc.credentials.protocol || 'http').toLowerCase() === 'socks5' ? 'socks5' : 'http')
     const base = username.replace(/-region-.*$/i, '').replace(/-session-.*$/i, '')
     const out: ProxyConfig[] = []
     for (let i = 0; i < Math.max(1, Math.min(100, opts.count)); i++) {

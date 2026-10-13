@@ -85,6 +85,7 @@ export interface ProviderBalance {
 }
 
 export interface ProviderGenerateOptions {
+  protocol?: 'http' | 'socks5'
   country?: string
   state?: string
   city?: string
