@@ -23,6 +23,16 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 - `navigator.webdriver` false, no automation banner, native-looking overrides (`toString` returns `[native code]`)
 - Launch flags are kept to the bare minimum (no `--no-sandbox`, none of Playwright's `--disable-features` list). When the profile OS equals the host OS, Chrome sends its own user agent and client hints untouched; language comes from the profile preferences. Cross-OS profiles use a CDP user agent override and are less stealthy.
 
+**Account and cloud sync** (backed by [FacetBrowser-web](https://github.com/noneym/FacetBrowser-web))
+- Sign in or register inside the app; 14-day trial, lifetime Starter (15 profiles) and Unlimited licenses
+- Profiles, proxies and groups sync between machines (last-write-wins, deletions propagate)
+- Cookie jars are uploaded while a profile runs and on stop, and pulled before launch when another machine saved a newer one
+- Offline grace of 7 days on the last confirmed license; server address configurable in Settings
+
+**Proxy providers**
+- Connect GonzoProxy (API key, optional proxy login) and 2Captcha Proxy (API key plus gateway credentials) accounts; credentials are stored encrypted in your account
+- See balances, generate proxies into the library, or assign one to a profile straight from the editor
+
 **Proxy**
 - HTTP, HTTPS, SOCKS4 and SOCKS5 with authentication. Credentials never reach Chromium: a local bridge on 127.0.0.1 opens the upstream connection, so SOCKS5 + password works too
 - Proxy library with bulk paste in any common format (`scheme://user:pass@host:port`, `host:port:user:pass`, `user:pass@host:port`, ...)

@@ -4,7 +4,9 @@ import type { Settings } from '@shared/types'
 import { useApp } from '@/store/app'
 import { useT } from '@/lib/i18n'
 import { toast } from '@/store/toast'
-import { Button, Field, Input, Select } from '@/components/ui'
+import { Button, Field, Input, Select, Modal } from '@/components/ui'
+import type { Key } from '@/lib/i18n'
+import { timeAgo } from '@/lib/format'
 
 export function SettingsPage(): JSX.Element {
   const t = useT()
@@ -35,6 +37,8 @@ export function SettingsPage(): JSX.Element {
           <h1 className="text-[20px] font-semibold tracking-tight">{t('settings.title')}</h1>
           <Button variant="primary" onClick={save} disabled={!dirty} loading={saving}>{t('common.save')}</Button>
         </header>
+
+        <AccountSection />
 
         <Section title={t('settings.browser')} hint={t('settings.browserHint')}>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -74,6 +78,9 @@ export function SettingsPage(): JSX.Element {
               <Button icon={<FolderOpen size={15} />} onClick={async () => { const p = await window.api.app.pickFile({ directory: true }); if (p) set('profilesDir', p) }}>{t('settings.browse')}</Button>
               <Button variant="ghost" icon={<ArrowSquareOut size={15} />} onClick={() => window.api.app.openPath(settings.profilesDir)}>{t('settings.openFolder')}</Button>
             </div>
+          </Field>
+          <Field label={t('auth.server')}>
+            <Input value={draft.apiBaseUrl} onChange={(e) => set('apiBaseUrl', e.target.value)} className="font-mono text-[12px]" placeholder="https://facetbrowser.com" />
           </Field>
           <Field label={t('settings.defaultStartUrl')}>
             <Input value={draft.defaultStartUrl} onChange={(e) => set('defaultStartUrl', e.target.value)} placeholder="https://" />
@@ -116,6 +123,59 @@ export function SettingsPage(): JSX.Element {
         </Section>
       </div>
     </div>
+  )
+}
+
+function AccountSection(): JSX.Element | null {
+  const t = useT()
+  const cloud = useApp((s) => s.cloud)
+  const setCloud = useApp((s) => s.setCloud)
+  const settings = useApp((s) => s.settings)!
+  const [confirm, setConfirm] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  if (!cloud?.loggedIn || !cloud.user) return null
+  const u = cloud.user
+  const trialLeft = u.trialEndsAt ? Math.max(0, Math.ceil((u.trialEndsAt - Date.now()) / 86400000)) : 0
+  const run = async (key: string, fn: () => Promise<unknown>, okMsg?: string): Promise<void> => {
+    setBusy(key)
+    try {
+      const r = await fn()
+      if (r && typeof r === 'object' && 'loggedIn' in (r as object)) setCloud(r as typeof cloud)
+      if (okMsg) toast.ok(okMsg)
+    } catch (e) {
+      toast.err(String((e as Error).message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const webUrl = `${settings.apiBaseUrl.replace(/\/$/, '')}/account`
+  return (
+    <Section title={t('account.title')}>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-[12.5px]">
+        <dt className="text-fg-muted">{t('auth.email')}</dt><dd className="font-mono">{u.email}</dd>
+        <dt className="text-fg-muted">{t('account.plan')}</dt>
+        <dd>{t(`account.plan.${u.plan}` as Key)}{u.plan === 'trial' ? ` · ${u.planActive ? t('account.trialLeft', { n: trialLeft }) : t('account.trialEnded')}` : ''}</dd>
+        <dt className="text-fg-muted">{t('account.profiles')}</dt><dd className="font-mono">{u.profileLimit === null ? t('account.unlimited') : u.profileLimit}</dd>
+        <dt className="text-fg-muted">{t('account.sync')}</dt>
+        <dd>{cloud.syncing ? t('account.syncing') : !cloud.online ? t('account.offline') : cloud.lastSyncAt ? t('account.synced', { t: timeAgo(cloud.lastSyncAt) }) : '-'}{cloud.lastError && <span className="ml-2 text-warn">{t(`account.syncErr.${cloud.lastError}` as Key)}</span>}</dd>
+      </dl>
+      {!u.emailVerified && (
+        <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] border border-warn/30 bg-warn/8 px-3 py-2 text-[12.5px] text-warn">
+          {t('account.verify')}
+          <Button size="sm" loading={busy === 'resend'} onClick={() => run('resend', () => window.api.cloud.resendVerification(), t('account.resent'))}>{t('account.resend')}</Button>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button loading={busy === 'me'} onClick={() => run('me', () => window.api.cloud.me())}>{t('account.refresh')}</Button>
+        <Button loading={busy === 'sync'} onClick={() => run('sync', () => window.api.cloud.syncNow())}>{t('account.syncNow')}</Button>
+        <Button onClick={() => window.api.app.openExternal(webUrl)}>{u.plan === 'unlimited' ? t('account.manage') : t('account.upgrade')}</Button>
+        <Button variant="danger" onClick={() => setConfirm(true)}>{t('account.signOut')}</Button>
+      </div>
+      <Modal open={confirm} onClose={() => setConfirm(false)} title={t('account.signOut')}
+        footer={<><Button onClick={() => setConfirm(false)}>{t('common.cancel')}</Button><Button variant="danger" onClick={() => { setConfirm(false); run('out', () => window.api.cloud.logout()) }}>{t('account.signOut')}</Button></>}>
+        <p className="text-[13px] text-fg-muted">{t('account.signOutConfirm')}</p>
+      </Modal>
+    </Section>
   )
 }
 

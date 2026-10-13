@@ -11,6 +11,10 @@ import { hostOs, launcher } from './browser/launcher'
 import { detectBrowser } from './browser/chrome-detect'
 import { checkProxy, pool } from './proxy/checker'
 import { parseProxyLine, parseProxyList } from './proxy/parse'
+import { cloud, CloudError } from './cloud/client'
+import { sync } from './cloud/sync'
+import { providers, providerMeta } from './providers'
+import type { ProviderAccount, ProviderGenerateOptions } from '@shared/cloud'
 
 function win(): BrowserWindow | null {
   return BrowserWindow.getAllWindows()[0] || null
@@ -68,8 +72,16 @@ export function newProfile(partial: Partial<Profile> = {}): Profile {
   }
 }
 
+function assertProfileCapacity(adding: number): void {
+  const limit = sync.profileLimit()
+  if (limit !== null && store().profiles.length + adding > limit) throw new Error('profile_limit')
+}
+
 export function registerIpc(): void {
   const s = store()
+  s.on('local-change', () => sync.touch())
+  sync.on('status', (st) => send('cloud:status', st))
+  sync.on('data', () => send('cloud:data', null))
 
   // ---- app ---------------------------------------------------------------
   ipcMain.handle('app:info', (): AppInfo => {
@@ -110,7 +122,10 @@ export function registerIpc(): void {
   // ---- profiles ---------------------------------------------------------
   ipcMain.handle('profiles:list', () => s.profiles)
   ipcMain.handle('profiles:new', (_e, partial?: Partial<Profile>) => newProfile(partial))
-  ipcMain.handle('profiles:save', (_e, p: Profile) => s.upsertProfile(p))
+  ipcMain.handle('profiles:save', (_e, p: Profile) => {
+    if (!s.getProfile(p.id)) assertProfileCapacity(1)
+    return s.upsertProfile(p)
+  })
   ipcMain.handle('profiles:delete', async (_e, ids: string[], wipeData: boolean) => {
     for (const id of ids) {
       if (launcher.isRunning(id)) await launcher.stop(id)
@@ -123,6 +138,7 @@ export function registerIpc(): void {
   ipcMain.handle('profiles:clone', (_e, id: string, opts: { count: number; newFingerprint: boolean; copyData: boolean }) => {
     const src = s.getProfile(id)
     if (!src) throw new Error('Profile not found')
+    assertProfileCapacity(Math.max(1, opts.count))
     const created: Profile[] = []
     for (let i = 0; i < Math.max(1, opts.count); i++) {
       const clone: Profile = {
@@ -173,6 +189,7 @@ export function registerIpc(): void {
     for (const p of payload.proxies || []) if (!s.getProxy(p.id)) s.upsertProxy(p)
     for (const p of payload.profiles || []) {
       const existing = s.getProfile(p.id)
+      if (!existing) { try { assertProfileCapacity(1) } catch { break } }
       s.upsertProfile(existing ? { ...p, id: uid('p'), name: `${p.name} (imported)` } : p)
       n++
     }
@@ -204,6 +221,9 @@ export function registerIpc(): void {
   ipcMain.handle('browser:launch', async (_e, id: string) => {
     const p = s.getProfile(id)
     if (!p) throw new Error('Profile not found')
+    const gate = sync.licenseGate()
+    if (!gate.ok) throw new Error(gate.reason)
+    await sync.pullCookiesIfNewer(id).catch(() => {})
     const { config, info } = resolveProxy(p)
     await launcher.launch({ profile: p, proxy: config, proxyInfo: info, settings: s.settings })
     p.launchCount = (p.launchCount || 0) + 1
@@ -277,6 +297,55 @@ export function registerIpc(): void {
   ipcMain.handle('proxies:checkConfig', (_e, cfg: ProxyConfig) =>
     checkProxy(cfg, { contact: s.settings.getipintelContact, abuseKey: s.settings.abuseIpDbKey, speedTest: true, speedTestBytes: s.settings.speedTestBytes })
   )
+
+  // ---- cloud account ----------------------------------------------------
+  const wrap = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn()
+    } catch (e) {
+      if (e instanceof CloudError) throw new Error(e.code)
+      throw e
+    }
+  }
+  ipcMain.handle('cloud:status', () => sync.status())
+  ipcMain.handle('cloud:login', (_e, email: string, password: string) => wrap(async () => { await cloud.login(email, password); sync.start(); return sync.status() }))
+  ipcMain.handle('cloud:register', (_e, email: string, password: string) => wrap(async () => { await cloud.register(email, password); sync.start(); return sync.status() }))
+  ipcMain.handle('cloud:logout', async () => { sync.stop(); await cloud.logout(); return sync.status() })
+  ipcMain.handle('cloud:me', () => wrap(async () => { await cloud.me(); return sync.status() }))
+  ipcMain.handle('cloud:resendVerification', () => wrap(() => cloud.resendVerification()))
+  ipcMain.handle('cloud:forgot', (_e, email: string) => wrap(() => cloud.forgot(email)))
+  ipcMain.handle('cloud:syncNow', async () => { await sync.run(); return sync.status() })
+  ipcMain.handle('cloud:gate', () => sync.licenseGate())
+
+  // ---- proxy providers --------------------------------------------------
+  let providerCache: ProviderAccount[] = []
+  const loadAccounts = async (): Promise<ProviderAccount[]> => {
+    providerCache = await wrap(() => cloud.providerAccounts())
+    return providerCache
+  }
+  const accountById = async (id: string): Promise<ProviderAccount> => {
+    const acc = providerCache.find((a) => a.id === id) || (await loadAccounts()).find((a) => a.id === id)
+    if (!acc) throw new Error('Provider account not found')
+    return acc
+  }
+  ipcMain.handle('providers:meta', () => providerMeta())
+  ipcMain.handle('providers:accounts', () => loadAccounts())
+  ipcMain.handle('providers:save', async (_e, acc: Omit<ProviderAccount, 'createdAt' | 'updatedAt'>) => { await wrap(() => cloud.providerAccountSave(acc)); return loadAccounts() })
+  ipcMain.handle('providers:delete', async (_e, id: string) => { await wrap(() => cloud.providerAccountDelete(id)); return loadAccounts() })
+  ipcMain.handle('providers:balance', async (_e, id: string) => { const acc = await accountById(id); return providers[acc.provider].balance(acc) })
+  ipcMain.handle('providers:countries', async (_e, id: string) => { const acc = await accountById(id); return providers[acc.provider].countries(acc) })
+  ipcMain.handle('providers:generate', async (_e, id: string, opts: ProviderGenerateOptions, save: boolean) => {
+    const acc = await accountById(id)
+    const configs = await providers[acc.provider].generate(acc, opts)
+    if (!save) return { configs, saved: [] as SavedProxy[] }
+    const now = Date.now()
+    const saved: SavedProxy[] = []
+    for (const c of configs) {
+      const p = s.upsertProxy({ ...c, id: uid('x'), name: `${providers[acc.provider].name}${opts.country ? ' ' + opts.country.toUpperCase() : ''}`, tags: [acc.provider, ...(opts.country ? [opts.country.toUpperCase()] : [])], createdAt: now, updatedAt: now })
+      saved.push(p)
+    }
+    return { configs, saved }
+  })
 
   // ---- batch checker (proxy-checker port) ------------------------------
   let batchAbort = false

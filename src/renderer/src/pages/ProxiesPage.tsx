@@ -7,6 +7,8 @@ import { toast, errMsg } from '@/store/toast'
 import { timeAgo, proxyLine, proxyShort, latencyColor, kbps, proxyBucket } from '@/lib/format'
 import { Button, Checkbox, EmptyState, IconButton, Input, Modal, Textarea, TagInput, Toggle, Badge, Spinner, cx } from '@/components/ui'
 import { GradeBadge, QualityBar } from '@/components/GradeBadge'
+import { ProvidersDialog } from '@/components/Providers'
+import { Plugs } from '@phosphor-icons/react'
 
 type Bucket = 'all' | 'good' | 'bad' | 'unchecked'
 
@@ -22,6 +24,7 @@ export function ProxiesPage(): JSX.Element {
   const [bucket, setBucket] = useState<Bucket>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [addOpen, setAddOpen] = useState(false)
+  const [provOpen, setProvOpen] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null)
   const [speedTest, setSpeedTest] = useState(true)
@@ -86,6 +89,7 @@ export function ProxiesPage(): JSX.Element {
             <MagnifyingGlass size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('common.search')} className="w-56 pl-8" />
           </div>
+          <Button icon={<Plugs size={15} />} onClick={() => setProvOpen(true)}>{t('prov.title')}</Button>
           <Button icon={runningCheck ? <Spinner /> : <ArrowsClockwise size={15} />} disabled={runningCheck || proxies.length === 0} onClick={() => check(proxies.map((p) => p.id))}>{t('proxies.checkAll')}</Button>
           <Button variant="primary" icon={<Plus size={15} weight="bold" />} onClick={() => setAddOpen(true)}>{t('proxies.add')}</Button>
         </div>
@@ -148,6 +152,7 @@ export function ProxiesPage(): JSX.Element {
       </div>
 
       <AddProxiesDialog open={addOpen} onClose={() => setAddOpen(false)} />
+      <ProvidersDialog open={provOpen} onClose={() => setProvOpen(false)} />
 
       <Modal open={!!deleteIds} onClose={() => setDeleteIds(null)} title={t('common.delete')}
         footer={<><Button onClick={() => setDeleteIds(null)}>{t('common.cancel')}</Button><Button variant="danger" onClick={del}>{t('common.delete')}</Button></>}>

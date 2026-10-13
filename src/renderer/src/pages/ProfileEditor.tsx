@@ -3,7 +3,9 @@ import { ArrowsClockwise, Lightning, Play, MapPin } from '@phosphor-icons/react'
 import type { Fingerprint, OsFamily, Profile, ProxyConfig, ProxyCheckResult, ProxyProtocol } from '@shared/types'
 import { useApp } from '@/store/app'
 import { useT, type Key } from '@/lib/i18n'
-import { toast, errMsg } from '@/store/toast'
+import { toast, errMsg, friendlyError } from '@/store/toast'
+import { GenerateDialog, useProviderAccounts } from '@/components/Providers'
+import type { ProviderAccount } from '@shared/cloud'
 import { proxyShort, TIMEZONES, LOCALE_OPTIONS, osLabel } from '@/lib/format'
 import { Button, Drawer, Field, Input, Select, Tabs, TagInput, Textarea, Toggle, Segmented, Modal, cx } from '@/components/ui'
 import { GradeBadge } from '@/components/GradeBadge'
@@ -45,13 +47,13 @@ export function ProfileEditor(): JSX.Element {
           await window.api.browser.launch(saved.id)
           toast.ok(t('profiles.launched', { name: saved.name }))
         } catch (e) {
-          toast.err(t('profiles.launchFailed', { err: errMsg(e) }))
+          toast.err(t('profiles.launchFailed', { err: friendlyError(e) }))
         }
       }
       closeEditor()
       return saved
     } catch (e) {
-      toast.err(errMsg(e))
+      toast.err(friendlyError(e))
       return null
     } finally {
       setSaving(false)
@@ -159,6 +161,8 @@ function ProxyTab({ draft, patch, patchFp }: { draft: Profile; patch: (p: Partia
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<ProxyCheckResult | null>(null)
   const [pasteLine, setPasteLine] = useState('')
+  const { accounts: providerAccounts } = useProviderAccounts()
+  const [genFor, setGenFor] = useState<ProviderAccount | null>(null)
   const mode = draft.proxy.mode
   const custom: ProxyConfig = draft.proxy.custom || { protocol: 'http', host: '', port: 8080 }
   const saved = useMemo(() => proxies.find((p) => p.id === draft.proxy.savedId), [proxies, draft.proxy.savedId])
@@ -206,6 +210,16 @@ function ProxyTab({ draft, patch, patchFp }: { draft: Profile; patch: (p: Partia
           options={[{ id: 'none', label: t('editor.proxy.none') }, { id: 'saved', label: t('editor.proxy.saved') }, { id: 'custom', label: t('editor.proxy.custom') }]}
         />
       </Field>
+
+      {providerAccounts.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-md)] border border-line bg-bg px-3 py-2">
+          <span className="text-[12.5px] text-fg-muted">{t('prov.fromProvider')}:</span>
+          {providerAccounts.map((acc) => (
+            <Button key={acc.id} size="sm" icon={<Lightning size={12} weight="fill" />} onClick={() => setGenFor(acc)}>{acc.label}</Button>
+          ))}
+        </div>
+      )}
+      <GenerateDialog acc={genFor} single onClose={() => setGenFor(null)} onGenerated={(saved) => { if (saved[0]) { patch({ proxy: { mode: 'saved', savedId: saved[0].id } }); toast.ok(t('prov.assigned')) } }} />
 
       {mode === 'saved' && (
         proxies.length === 0 ? (

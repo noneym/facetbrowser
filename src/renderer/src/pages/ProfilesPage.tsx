@@ -3,7 +3,7 @@ import { Plus, MagnifyingGlass, Play, Stop, DotsThree, Copy, Trash, Export, Down
 import type { Profile } from '@shared/types'
 import { useApp } from '@/store/app'
 import { useT } from '@/lib/i18n'
-import { toast, errMsg } from '@/store/toast'
+import { toast, errMsg, friendlyError } from '@/store/toast'
 import { timeAgo, osLabel, proxyShort } from '@/lib/format'
 import { Button, Checkbox, EmptyState, IconButton, Input, Menu, Modal, Badge, Toggle, Select, cx } from '@/components/ui'
 import { GradeBadge } from '@/components/GradeBadge'
@@ -58,7 +58,7 @@ export function ProfilesPage(): JSX.Element {
       await window.api.browser.launch(p.id)
       toast.ok(t('profiles.launched', { name: p.name }))
     } catch (e) {
-      toast.err(t('profiles.launchFailed', { err: errMsg(e) }))
+      toast.err(t('profiles.launchFailed', { err: friendlyError(e) }))
     } finally {
       setBusyFor(p.id, false)
     }
@@ -79,6 +79,8 @@ export function ProfilesPage(): JSX.Element {
     refreshProfiles()
   }
   const createNew = async (): Promise<void> => {
+    const limit = useApp.getState().cloud?.user?.profileLimit ?? null
+    if (limit !== null && profiles.length >= limit) { toast.err(t('gate.profile_limit')); return }
     const p = await window.api.profiles.new()
     openEditor(p, true)
   }
@@ -283,7 +285,7 @@ function CloneDialog({ profile, onClose }: { profile: Profile | null; onClose: (
       refreshProfiles()
       onClose()
     } catch (e) {
-      toast.err(errMsg(e))
+      toast.err(friendlyError(e))
     } finally {
       setBusy(false)
     }

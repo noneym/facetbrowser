@@ -121,6 +121,7 @@ export interface Group {
   id: string
   name: string
   color: string
+  updatedAt?: number
 }
 
 export interface Settings {
@@ -134,6 +135,7 @@ export interface Settings {
   speedTestBytes: number
   language: 'tr' | 'en'
   hideAutomationBar: boolean
+  apiBaseUrl: string
 }
 
 export type RunState = 'starting' | 'running' | 'stopping'

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { t, type Key } from '@/lib/i18n'
 
 export interface Toast {
   id: number
@@ -32,4 +33,13 @@ export const toast = {
 export function errMsg(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e)
   return m.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+}
+
+// Known machine codes from main/cloud get a translated sentence.
+export function friendlyError(e: unknown): string {
+  const code = errMsg(e)
+  const gate = ['not_logged_in', 'email_not_verified', 'plan_inactive', 'offline_too_long', 'profile_limit']
+  if (gate.includes(code)) return t(`gate.${code}` as Key)
+  if (code.startsWith('network')) return t('auth.err.network')
+  return code
 }

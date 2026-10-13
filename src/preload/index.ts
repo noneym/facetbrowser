@@ -3,6 +3,7 @@ import type {
   AppInfo, BatchCheckOptions, BatchItemEvent, CookieRecord, Fingerprint, GenerateFingerprintOptions, Group, Profile,
   ProxyCheckResult, ProxyConfig, RunningProfile, SavedProxy, Settings
 } from '@shared/types'
+import type { CloudStatus, ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerateOptions } from '@shared/cloud'
 
 type Listener<T> = (payload: T) => void
 function on<T>(channel: string, cb: Listener<T>): () => void {
@@ -64,6 +65,28 @@ const api = {
     checkConfig: (cfg: ProxyConfig): Promise<ProxyCheckResult> => ipcRenderer.invoke('proxies:checkConfig', cfg),
     onChecking: (cb: Listener<{ id: string; stage: string }>) => on('proxies:checking', cb),
     onChecked: (cb: Listener<{ id: string; result: ProxyCheckResult }>) => on('proxies:checked', cb)
+  },
+  cloud: {
+    status: (): Promise<CloudStatus> => ipcRenderer.invoke('cloud:status'),
+    login: (email: string, password: string): Promise<CloudStatus> => ipcRenderer.invoke('cloud:login', email, password),
+    register: (email: string, password: string): Promise<CloudStatus> => ipcRenderer.invoke('cloud:register', email, password),
+    logout: (): Promise<CloudStatus> => ipcRenderer.invoke('cloud:logout'),
+    me: (): Promise<CloudStatus> => ipcRenderer.invoke('cloud:me'),
+    resendVerification: (): Promise<void> => ipcRenderer.invoke('cloud:resendVerification'),
+    forgot: (email: string): Promise<void> => ipcRenderer.invoke('cloud:forgot', email),
+    syncNow: (): Promise<CloudStatus> => ipcRenderer.invoke('cloud:syncNow'),
+    gate: (): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke('cloud:gate'),
+    onStatus: (cb: Listener<CloudStatus>) => on('cloud:status', cb),
+    onData: (cb: Listener<null>) => on('cloud:data', cb)
+  },
+  providers: {
+    meta: (): Promise<Array<{ id: string; name: string; canGenerate: boolean; fields: Array<{ key: string; label: string; secret?: boolean; hint?: string; optional?: boolean }> }>> => ipcRenderer.invoke('providers:meta'),
+    accounts: (): Promise<ProviderAccount[]> => ipcRenderer.invoke('providers:accounts'),
+    save: (acc: Omit<ProviderAccount, 'createdAt' | 'updatedAt'>): Promise<ProviderAccount[]> => ipcRenderer.invoke('providers:save', acc),
+    delete: (id: string): Promise<ProviderAccount[]> => ipcRenderer.invoke('providers:delete', id),
+    balance: (id: string): Promise<ProviderBalance> => ipcRenderer.invoke('providers:balance', id),
+    countries: (id: string): Promise<ProviderCountry[]> => ipcRenderer.invoke('providers:countries', id),
+    generate: (id: string, opts: ProviderGenerateOptions, save: boolean): Promise<{ configs: ProxyConfig[]; saved: SavedProxy[] }> => ipcRenderer.invoke('providers:generate', id, opts, save)
   },
   checker: {
     run: (lines: string[], opts: BatchCheckOptions): Promise<(ProxyCheckResult | null)[]> => ipcRenderer.invoke('checker:run', lines, opts),

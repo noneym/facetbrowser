@@ -201,6 +201,8 @@ class Launcher extends EventEmitter {
     if (!r) return
     r.state = 'stopping'
     this.emitStatus()
+    // Give listeners (cookie upload) a chance to read the live context first.
+    await Promise.all(this.listeners('beforeStop').map((l) => Promise.resolve((l as (id: string) => Promise<void>)(profileId)).catch(() => {})))
     try {
       await r.context?.close()
     } catch {

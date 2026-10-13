@@ -2,6 +2,7 @@ import { UserCircle, Globe, Pulse, GearSix, Warning } from '@phosphor-icons/reac
 import { useApp, type Page } from '@/store/app'
 import { useT } from '@/lib/i18n'
 import { cx } from './ui'
+import { AccountBadge } from './AccountBadge'
 
 export function Sidebar(): JSX.Element {
   const t = useT()
@@ -48,6 +49,7 @@ export function Sidebar(): JSX.Element {
       </nav>
 
       <div className="mt-auto flex flex-col gap-2 border-t border-line p-3 text-[12px]">
+        <AccountBadge />
         {running.length > 0 && (
           <div className="flex items-center gap-2 text-fg-muted">
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-accent" />
