@@ -178,7 +178,7 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
         </Field>
         {!single && <Field label={t('prov.count')}><Input type="number" min={1} max={100} value={count} onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} className="w-28 font-mono" /></Field>}
         <Toggle checked={sticky} onChange={setSticky} label={sticky ? t('prov.sticky') : t('prov.rotating')} />
-        {sticky && <Field label={t('prov.ttl')}><Input type="number" min={1} max={168} value={ttl} onChange={(e) => setTtl(Math.max(1, Math.min(168, Number(e.target.value) || 24)))} className={cx('w-28 font-mono')} /></Field>}
+        {sticky && <Field label={t('prov.ttl')} hint={acc?.provider === '2captcha' ? '2Captcha: max 2 h' : 'GonzoProxy: max 168 h'}><Input type="number" min={1} max={168} value={ttl} onChange={(e) => setTtl(Math.max(1, Math.min(168, Number(e.target.value) || 24)))} className={cx('w-28 font-mono')} /></Field>}
       </div>
     </Modal>
   )

@@ -3,6 +3,7 @@ import { useApp } from '@/store/app'
 import { useT, type Key } from '@/lib/i18n'
 import { toast, errMsg } from '@/store/toast'
 import { Button, Field, Input, Segmented } from '@/components/ui'
+import { Logo } from '@/components/Logo'
 
 export function AuthScreen(): JSX.Element {
   const t = useT()
@@ -51,9 +52,7 @@ export function AuthScreen(): JSX.Element {
     <div className="flex h-full items-center justify-center p-8">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex items-center gap-2.5">
-          <span className="grid h-7 w-7 place-items-center rounded-[7px] bg-accent text-accent-ink">
-            <svg width="14" height="14" viewBox="0 0 12 12" aria-hidden><path d="M6 1 11 4.2 9.2 10H2.8L1 4.2Z" fill="currentColor" /></svg>
-          </span>
+          <Logo size={30} />
           <span className="text-[16px] font-semibold tracking-tight">FacetBrowser</span>
         </div>
         <h1 className="text-[20px] font-semibold tracking-tight">{t('auth.title')}</h1>

@@ -1,10 +1,14 @@
-import type { ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerateOptions } from '@shared/cloud'
+import type { ProviderAccount, ProviderCountry, ProviderGenerateOptions } from '@shared/cloud'
 import type { ProxyConfig } from '@shared/types'
 import type { ProviderAdapter } from './index'
 import { parseProxyLine } from '../proxy/parse'
 
-// GonzoProxy residential proxies. REST API documented at
-// help.gonzoproxy.com/api/gonzoproxy-api-documentation (x-api-key header).
+// GonzoProxy residential proxies. REST API: help.gonzoproxy.com/api
+// (x-api-key header). Verified response shapes:
+//   GET  /proxy-api/countries -> { countries: [{ country_code, country_name, isps[] }] }
+//   GET  /proxy-api/states?country=US -> { states: ["Alabama", ...] }
+//   POST /proxy-api/generate -> { success, proxies: ["login_c_US_s_x_ttl_24h:pass@connect.gonzoproxy.app:10000"] }
+//   POST /list-sub-accounts -> { success, data: { sub_accounts: [...] } }
 const API = 'https://api.gonzoproxy.app/functions/v1'
 const GATEWAY = 'connect.gonzoproxy.app'
 const GATEWAY_PORT = 10000
@@ -16,10 +20,8 @@ async function call<T>(acc: ProviderAccount, path: string, method: 'GET' | 'POST
   const text = await res.text()
   let data: unknown = null
   try { data = JSON.parse(text) } catch { data = text }
-  if (!res.ok) {
-    const err = (data as { error?: string } | null)?.error || `HTTP ${res.status}`
-    throw new Error(`GonzoProxy: ${err}`)
-  }
+  const err = (data as { error?: string } | null)?.error
+  if (!res.ok || err) throw new Error(`GonzoProxy: ${err || `HTTP ${res.status}`}`)
   return data as T
 }
 
@@ -30,7 +32,7 @@ function fmtBytes(n: number): string {
   return `${Math.round(n / 1024)} KB`
 }
 
-// Builds a gateway username from the documented segment syntax:
+// Documented username syntax, used when the account stores its own proxy login:
 //   <login>_c_US_sd_443_city_Los-Angeles_s_<session>_ttl_72h
 function buildUsername(login: string, opts: ProviderGenerateOptions, sessionId: string): string {
   const parts = [login]
@@ -50,7 +52,7 @@ export const gonzoproxy: ProviderAdapter = {
   canGenerate: true,
   fields: [
     { key: 'apiKey', label: 'API key', secret: true, hint: 'dashboard.gonzoproxy.com > Settings > API Keys' },
-    { key: 'login', label: 'Proxy login', hint: 'From Proxy Setup or a sub-user (used to build gateway usernames)', optional: true },
+    { key: 'login', label: 'Proxy login', hint: 'Optional: a sub-user login; otherwise the API generator picks the account default', optional: true },
     { key: 'password', label: 'Proxy password', secret: true, optional: true }
   ],
 
@@ -59,7 +61,7 @@ export const gonzoproxy: ProviderAdapter = {
       const r = await call<{ data?: { sub_accounts?: Array<{ proxy_login: string; sub_account_name: string; is_active: boolean; traffic_remaining: number; traffic_total: number }> } }>(acc, '/list-sub-accounts', 'POST', {})
       const subs = r.data?.sub_accounts || []
       const lines = subs.map((s) => ({ label: `${s.sub_account_name || s.proxy_login}${s.is_active ? '' : ' (inactive)'}`, value: `${fmtBytes(s.traffic_remaining)} left of ${fmtBytes(s.traffic_total)}` }))
-      if (!lines.length) lines.push({ label: 'Sub-accounts', value: 'none' })
+      if (!lines.length) lines.push({ label: 'API', value: 'connected (no sub-accounts; traffic is shown in the dashboard)' })
       return { ok: true, lines }
     } catch (e) {
       return { ok: false, error: (e as Error).message, lines: [] }
@@ -67,46 +69,35 @@ export const gonzoproxy: ProviderAdapter = {
   },
 
   async countries(acc) {
-    const r = await call<{ countries?: Array<{ code?: string; name?: string } | string> }>(acc, '/proxy-api/countries', 'GET')
-    const list = (r.countries || []).map((c) => (typeof c === 'string' ? { code: c, name: c } : { code: String(c.code || c.name), name: String(c.name || c.code) }))
-    return list.filter((c): c is ProviderCountry => !!c.code)
+    const r = await call<{ countries?: Array<{ country_code?: string; country_name?: string }> }>(acc, '/proxy-api/countries', 'GET')
+    return (r.countries || [])
+      .filter((c) => c.country_code)
+      .map((c): ProviderCountry => ({ code: String(c.country_code), name: String(c.country_name || c.country_code) }))
+      .sort((a, b) => a.name.localeCompare(b.name))
   },
 
   async generate(acc, opts) {
     const count = Math.max(1, Math.min(100, opts.count))
-    // Prefer the official generator; it returns ready-to-use proxy strings.
+    const body: Record<string, unknown> = { country: (opts.country || 'US').toUpperCase(), count, rotation: !opts.sticky }
+    if (opts.state) body.state = opts.state
+    if (opts.city) body.city = opts.city
+    if (opts.sticky) { body.ttl = Math.max(1, Math.min(168, opts.ttlHours || 24)); body.ttl_unit = 'h' }
+    if (acc.credentials.login) body.login = acc.credentials.login
+    if (acc.credentials.password) body.password = acc.credentials.password
     try {
-      const body: Record<string, unknown> = { country: (opts.country || 'US').toUpperCase(), count, rotation: !opts.sticky, format: 'host:port:user:pass' }
-      if (opts.state) body.state = opts.state
-      if (opts.city) body.city = opts.city
-      if (opts.sticky) { body.ttl = Math.max(1, Math.min(168, opts.ttlHours || 24)); body.ttl_unit = 'h' }
-      if (acc.credentials.login) body.login = acc.credentials.login
-      if (acc.credentials.password) body.password = acc.credentials.password
-      const r = await call<unknown>(acc, '/proxy-api/generate', 'POST', body)
-      const strings = extractStrings(r)
-      const parsed = strings.map((s) => parseProxyLine(s, 'http')).filter((p): p is ProxyConfig => !!p)
+      const r = await call<{ proxies?: string[] }>(acc, '/proxy-api/generate', 'POST', body)
+      const parsed = (r.proxies || []).map((s) => parseProxyLine(s, 'http')).filter((p): p is ProxyConfig => !!p)
       if (parsed.length) return parsed
+      throw new Error('GonzoProxy: generator returned no proxies')
     } catch (e) {
+      // Fallback: build gateway usernames locally from a stored login/password.
       if (!acc.credentials.login || !acc.credentials.password) throw e
+      const out: ProxyConfig[] = []
+      for (let i = 0; i < count; i++) {
+        const sid = Math.random().toString(36).slice(2, 10)
+        out.push({ protocol: 'http', host: GATEWAY, port: GATEWAY_PORT, username: buildUsername(acc.credentials.login, opts, sid), password: acc.credentials.password })
+      }
+      return out
     }
-    // Fallback: build gateway usernames locally from the stored login/password.
-    if (!acc.credentials.login || !acc.credentials.password) throw new Error('GonzoProxy: generator returned nothing and no proxy login/password is stored')
-    const out: ProxyConfig[] = []
-    for (let i = 0; i < count; i++) {
-      const sid = Math.random().toString(36).slice(2, 10)
-      out.push({ protocol: 'http', host: GATEWAY, port: GATEWAY_PORT, username: buildUsername(acc.credentials.login, opts, sid), password: acc.credentials.password })
-    }
-    return out
   }
-}
-
-function extractStrings(v: unknown): string[] {
-  if (typeof v === 'string') return v.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
-  if (Array.isArray(v)) return v.flatMap((x) => (typeof x === 'string' ? [x] : extractStrings(x)))
-  if (v && typeof v === 'object') {
-    const o = v as Record<string, unknown>
-    for (const k of ['proxies', 'data', 'result', 'list']) if (k in o) return extractStrings(o[k])
-    if ('host' in o && 'port' in o) return [`${o.host}:${o.port}${o.user || o.username ? `:${o.user || o.username}:${o.pass || o.password || ''}` : ''}`]
-  }
-  return []
 }

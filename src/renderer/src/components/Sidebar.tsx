@@ -3,6 +3,7 @@ import { useApp, type Page } from '@/store/app'
 import { useT } from '@/lib/i18n'
 import { cx } from './ui'
 import { AccountBadge } from './AccountBadge'
+import { Logo } from './Logo'
 
 export function Sidebar(): JSX.Element {
   const t = useT()
@@ -24,9 +25,7 @@ export function Sidebar(): JSX.Element {
     <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-surface">
       <div className="drag-region flex h-10 items-center gap-2 px-4">
         <span className="no-drag flex items-center gap-2">
-          <span className="grid h-5 w-5 place-items-center rounded-[5px] bg-accent text-accent-ink">
-            <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden><path d="M6 1 11 4.2 9.2 10H2.8L1 4.2Z" fill="currentColor" /></svg>
-          </span>
+          <Logo size={22} />
           <span className="text-[13px] font-semibold tracking-tight">FacetBrowser</span>
         </span>
       </div>
