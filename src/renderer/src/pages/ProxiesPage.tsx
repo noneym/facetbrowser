@@ -163,7 +163,7 @@ export function ProxiesPage(): JSX.Element {
   )
 }
 
-function ProxyRow({ p, r, stage, open, selected, usedBy, onToggle, onExpand, onCheck, onCopy, onDelete }: {
+function ProxyRow({ p, r, stage, open, selected, usedBy, onToggle, onExpand, onCheck, onCopy, onDelete, onProtocol }: {
   p: SavedProxy; r?: ProxyCheckResult; stage?: string; open: boolean; selected: boolean; usedBy: number
   onToggle: (v: boolean) => void; onExpand: () => void; onCheck: () => void; onCopy: () => void; onDelete: () => void; onProtocol: (p: ProxyProtocol) => void
 }): JSX.Element {
