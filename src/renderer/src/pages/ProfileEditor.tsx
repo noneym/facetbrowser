@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowsClockwise, Lightning, Play, MapPin } from '@phosphor-icons/react'
+import { ArrowsClockwise, Lightning, Play, MapPin, Copy } from '@phosphor-icons/react'
 import type { Fingerprint, OsFamily, Profile, ProxyConfig, ProxyCheckResult, ProxyProtocol } from '@shared/types'
 import { useApp } from '@/store/app'
 import { useT, type Key } from '@/lib/i18n'
 import { toast, errMsg, friendlyError } from '@/store/toast'
 import { GenerateDialog, useProviderAccounts } from '@/components/Providers'
 import type { ProviderAccount } from '@shared/cloud'
-import { proxyShort, TIMEZONES, LOCALE_OPTIONS, osLabel } from '@/lib/format'
-import { Button, Drawer, Field, Input, Select, Tabs, TagInput, Textarea, Toggle, Segmented, Modal, cx } from '@/components/ui'
+import { proxyShort, proxyLine, TIMEZONES, LOCALE_OPTIONS, osLabel } from '@/lib/format'
+import { Button, Drawer, Field, Input, Select, Tabs, TagInput, Textarea, Toggle, Segmented, Modal, Menu, cx } from '@/components/ui'
 import { GradeBadge } from '@/components/GradeBadge'
 import { ProxyDetail } from './ProxiesPage'
 
@@ -200,6 +200,11 @@ function ProxyTab({ draft, patch, patchFp }: { draft: Profile; patch: (p: Partia
     }
   }
   const shownResult = mode === 'saved' ? saved?.lastCheck : testResult
+  const activeConfig: ProxyConfig | null = mode === 'saved' ? (saved ? { protocol: saved.protocol, host: saved.host, port: saved.port, username: saved.username, password: saved.password } : null) : mode === 'custom' && custom.host ? custom : null
+  const copyText = (text: string): void => {
+    navigator.clipboard.writeText(text)
+    toast.ok(t('common.copied'))
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -264,6 +269,16 @@ function ProxyTab({ draft, patch, patchFp }: { draft: Profile; patch: (p: Partia
           <div className="flex flex-wrap items-center gap-2">
             <Button icon={<ArrowsClockwise size={14} />} loading={testing} onClick={test} disabled={(mode === 'saved' && !saved) || (mode === 'custom' && !custom.host)}>{t('editor.proxy.test')}</Button>
             <Button icon={<MapPin size={14} />} onClick={adapt} disabled={mode !== 'saved' || !saved?.lastCheck?.countryCode} title={t('editor.proxy.adaptHint')}>{t('editor.proxy.adapt')}</Button>
+            {activeConfig && (
+              <Menu
+                trigger={<Button icon={<Copy size={14} />}>{t('common.copy')}</Button>}
+                items={[
+                  { label: proxyLine(activeConfig), onClick: () => copyText(proxyLine(activeConfig)) },
+                  { label: `${activeConfig.host}:${activeConfig.port}${activeConfig.username ? `:${activeConfig.username}:${activeConfig.password || ''}` : ''}`, onClick: () => copyText(`${activeConfig.host}:${activeConfig.port}${activeConfig.username ? `:${activeConfig.username}:${activeConfig.password || ''}` : ''}`) },
+                  { label: proxyLine(activeConfig, false), onClick: () => copyText(proxyLine(activeConfig, false)) }
+                ]}
+              />
+            )}
             {shownResult && <GradeBadge result={shownResult} />}
           </div>
           {shownResult && (
