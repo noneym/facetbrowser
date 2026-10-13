@@ -180,6 +180,8 @@ const dict = {
   'fp.seed': ['Gürültü tohumu', 'Noise seed'],
   'fp.seedHint': ['Canvas, ses ve rect gürültüsü bu tohumdan türetilir; profil her açılışta aynı kalır.', 'Canvas, audio and rect noise derive from this seed so the profile stays stable between launches.'],
   'fp.section.identity': ['Cihaz kimliği', 'Device identity'],
+  'fp.nativeNote': ['Bu makineyle aynı işletim sistemi: Chrome kendi gerçek user agent ve client hint\'lerini gönderir, en güvenli mod.', 'Same operating system as this machine: Chrome sends its own real user agent and client hints, the stealthiest mode.'],
+  'fp.crossOsNote': ['Farklı işletim sistemi: user agent CDP ile değiştirilir; bazı siteler bunu fark edebilir. Mümkünse makinenin kendi sistemini seç.', 'Different operating system: the user agent is overridden through CDP and some sites can notice. Prefer the host system when possible.'],
   'fp.section.locale': ['Dil, zaman ve konum', 'Language, time and location'],
   'fp.section.noise': ['Gürültü ve koruma', 'Noise and protection'],
   'fp.section.hw': ['Donanım', 'Hardware'],

@@ -2,6 +2,10 @@ import type { Fingerprint } from '@shared/types'
 
 export interface ScriptContext {
   publicIp?: string
+  // false when Chrome runs with its own UA (profile OS == host OS): the
+  // navigator identity is then left untouched so JS, headers and client
+  // hints all agree.
+  uaOverride?: boolean
 }
 
 // Builds the JavaScript that is injected into every frame before any page
@@ -30,7 +34,8 @@ export function buildFingerprintScript(fp: Fingerprint, ctx: ScriptContext = {})
     doNotTrack: fp.doNotTrack,
     batteryMask: fp.batteryMask,
     geolocationOff: fp.geolocation.mode === 'off',
-    publicIp: ctx.publicIp || null
+    publicIp: ctx.publicIp || null,
+    uaOverride: ctx.uaOverride !== false
   })
 
   return `(() => {
@@ -74,13 +79,14 @@ export function buildFingerprintScript(fp: Fingerprint, ctx: ScriptContext = {})
 
   // ---- navigator ---------------------------------------------------------
   const N = Navigator.prototype;
-  defineGetter(N, 'webdriver', false);
-  defineGetter(N, 'userAgent', C.userAgent);
-  defineGetter(N, 'appVersion', C.userAgent.replace(/^Mozilla\\//, ''));
-  defineGetter(N, 'platform', C.platform);
-  defineGetter(N, 'vendor', C.vendor);
-  defineGetter(N, 'language', C.languages[0]);
-  defineGetter(N, 'languages', () => Object.freeze(C.languages.slice()));
+  if (C.uaOverride) {
+    defineGetter(N, 'userAgent', C.userAgent);
+    defineGetter(N, 'appVersion', C.userAgent.replace(/^Mozilla\\//, ''));
+    defineGetter(N, 'platform', C.platform);
+    defineGetter(N, 'vendor', C.vendor);
+    defineGetter(N, 'language', C.languages[0]);
+    defineGetter(N, 'languages', () => Object.freeze(C.languages.slice()));
+  }
   defineGetter(N, 'hardwareConcurrency', C.hardwareConcurrency);
   defineGetter(N, 'deviceMemory', C.deviceMemory);
   defineGetter(N, 'maxTouchPoints', C.maxTouchPoints);

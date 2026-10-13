@@ -1,13 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
 import fs from 'fs'
 import type {
-  AppInfo, BatchCheckOptions, BatchItemEvent, CookieRecord, GenerateFingerprintOptions, Group, Profile,
+  AppInfo, Fingerprint, BatchCheckOptions, BatchItemEvent, CookieRecord, GenerateFingerprintOptions, Group, Profile,
   ProfileExport, ProxyCheckResult, ProxyConfig, SavedProxy, Settings
 } from '@shared/types'
 import { store, uid } from './store'
 import { generateFingerprint, reseed } from './fingerprint/generator'
 import { COUNTRY_LOCALES, PROFILE_COLORS } from './fingerprint/data'
-import { launcher } from './browser/launcher'
+import { hostOs, launcher } from './browser/launcher'
 import { detectBrowser } from './browser/chrome-detect'
 import { checkProxy, pool } from './proxy/checker'
 import { parseProxyLine, parseProxyList } from './proxy/parse'
@@ -30,6 +30,21 @@ function resolveProxy(profile: Profile): { config: ProxyConfig | null; info?: Pr
   return { config: null }
 }
 
+// Profiles that claim the host OS get the real screen geometry so window
+// size, screen size and pixel ratio never contradict each other.
+function generateForHost(opts: GenerateFingerprintOptions): Fingerprint {
+  const fp = generateFingerprint(opts)
+  if (fp.os === hostOs()) {
+    try {
+      const d = screen.getPrimaryDisplay()
+      fp.screen = { width: d.size.width, height: d.size.height, colorDepth: 24, pixelRatio: d.scaleFactor }
+    } catch {
+      /* keep generated */
+    }
+  }
+  return fp
+}
+
 export function newProfile(partial: Partial<Profile> = {}): Profile {
   const s = store()
   const browser = detectBrowser(s.settings)
@@ -43,7 +58,7 @@ export function newProfile(partial: Partial<Profile> = {}): Profile {
     color: PROFILE_COLORS[idx % PROFILE_COLORS.length],
     favorite: false,
     proxy: { mode: 'none' },
-    fingerprint: generateFingerprint({ browserVersion: browser.version || undefined }),
+    fingerprint: generateForHost({ browserVersion: browser.version || undefined }),
     startUrls: [],
     extensions: [],
     createdAt: now,
@@ -119,7 +134,7 @@ export function registerIpc(): void {
         launchCount: 0,
         lastLaunchedAt: undefined,
         favorite: false,
-        fingerprint: opts.newFingerprint ? generateFingerprint({ os: src.fingerprint.os, browserVersion: src.fingerprint.browserVersion }) : reseed(src.fingerprint)
+        fingerprint: opts.newFingerprint ? generateForHost({ os: src.fingerprint.os, browserVersion: src.fingerprint.browserVersion }) : reseed(src.fingerprint)
       }
       if (opts.newFingerprint) {
         clone.fingerprint.timezone = src.fingerprint.timezone
@@ -167,7 +182,7 @@ export function registerIpc(): void {
   // ---- fingerprint ------------------------------------------------------
   ipcMain.handle('fingerprint:generate', (_e, opts: GenerateFingerprintOptions) => {
     const browser = detectBrowser(s.settings)
-    return generateFingerprint({ browserVersion: browser.version || undefined, ...opts })
+    return generateForHost({ browserVersion: browser.version || undefined, ...opts })
   })
   ipcMain.handle('fingerprint:adaptToProxy', (_e, profile: Profile) => {
     const { info } = resolveProxy(profile)

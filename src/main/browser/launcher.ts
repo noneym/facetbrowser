@@ -2,7 +2,7 @@ import { chromium, type BrowserContext } from 'playwright-core'
 import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
-import type { CookieRecord, Profile, ProxyConfig, ProxyCheckResult, RunningProfile, Settings } from '@shared/types'
+import type { CookieRecord, OsFamily, Profile, ProxyConfig, ProxyCheckResult, RunningProfile, Settings } from '@shared/types'
 import { buildFingerprintScript } from './fingerprint-script'
 import { startBridge, type Bridge } from '../proxy/bridge'
 import { detectBrowser } from './chrome-detect'
@@ -21,6 +21,35 @@ export interface LaunchInput {
   settings: Settings
 }
 
+export function hostOs(): OsFamily {
+  return process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux'
+}
+
+// Chrome derives Accept-Language and navigator.languages from this pref, so
+// setting it in the profile is the only way to change the language without a
+// CDP user-agent override (which would also replace client hints).
+function writeLanguagePrefs(userDataDir: string, languages: string[]): void {
+  const dir = path.join(userDataDir, 'Default')
+  const file = path.join(dir, 'Preferences')
+  fs.mkdirSync(dir, { recursive: true })
+  let prefs: Record<string, unknown> = {}
+  try {
+    if (fs.existsSync(file)) prefs = JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch {
+    prefs = {}
+  }
+  const intl = (prefs.intl as Record<string, unknown>) || {}
+  intl.accept_languages = languages.join(',')
+  intl.selected_languages = languages.join(',')
+  prefs.intl = intl
+  // Skip the "restore pages?" bubble after a non-clean exit.
+  const profile = (prefs.profile as Record<string, unknown>) || {}
+  profile.exit_type = 'Normal'
+  profile.exited_cleanly = true
+  prefs.profile = profile
+  fs.writeFileSync(file, JSON.stringify(prefs), 'utf8')
+}
+
 class Launcher extends EventEmitter {
   private running = new Map<string, Running>()
 
@@ -36,6 +65,11 @@ class Launcher extends EventEmitter {
 
   isRunning(id: string): boolean {
     return this.running.has(id)
+  }
+
+  contextOf(id: string): BrowserContext | undefined {
+    const r = this.running.get(id)
+    return r && r.state === 'running' ? r.context : undefined
   }
 
   private emitStatus(): void {
@@ -66,9 +100,11 @@ class Launcher extends EventEmitter {
     try {
       const fp = profile.fingerprint
       const major = (browser.version || fp.browserVersion).split('.')[0]
-      // Keep the UA major version equal to the real engine so client hints,
-      // feature detection and the UA string never contradict each other.
-      const userAgent = fp.userAgent.replace(/Chrome\/\d+(\.\d+)*/, `Chrome/${major}.0.0.0`)
+      // When the profile OS equals the host OS we let Chrome send its own UA
+      // and client hints untouched; everything stays consistent at the
+      // network level. Cross-OS profiles need a CDP override of the UA.
+      const nativeUa = fp.os === hostOs()
+      const userAgent = nativeUa ? undefined : fp.userAgent.replace(/Chrome\/\d+(\.\d+)*/, `Chrome/${major}.0.0.0`)
 
       const timezoneId = fp.timezone === 'auto' ? proxyInfo?.timezone || undefined : fp.timezone
       let geolocation: { latitude: number; longitude: number; accuracy?: number } | undefined
@@ -78,11 +114,22 @@ class Launcher extends EventEmitter {
         geolocation = { latitude: proxyInfo.lat, longitude: proxyInfo.lon, accuracy: 1500 }
       }
 
+      writeLanguagePrefs(dir, fp.languages.length ? fp.languages : [fp.locale])
+
+      // We bypass Playwright's default switch list entirely: it disables
+      // dozens of features (client hint frames, HTTPS upgrades, translate,
+      // background networking...) and adds --no-sandbox, all of which make
+      // the browser look automated. Only the two switches Playwright needs
+      // to talk to the process are kept.
       const args = [
+        `--user-data-dir=${dir}`,
+        '--remote-debugging-pipe',
         '--disable-blink-features=AutomationControlled',
         '--no-first-run',
         '--no-default-browser-check',
-        '--disable-features=TranslateUI,IdleDetection,OptimizationHints',
+        '--disable-search-engine-choice-screen',
+        '--disable-session-crashed-bubble',
+        '--hide-crash-restore-bubble',
         `--lang=${fp.locale}`,
         `--window-size=${Math.min(fp.screen.width, 1600)},${Math.min(fp.screen.height, 1000)}`
       ]
@@ -96,28 +143,33 @@ class Launcher extends EventEmitter {
         args.push(`--disable-extensions-except=${extensions.join(',')}`)
         args.push(`--load-extension=${extensions.join(',')}`)
       }
+      args.push('about:blank')
 
       const context = await chromium.launchPersistentContext(dir, {
         executablePath: browser.path,
         headless: false,
+        chromiumSandbox: true,
         viewport: null,
         userAgent,
-        locale: fp.locale,
         timezoneId,
         geolocation,
         permissions: geolocation ? ['geolocation'] : [],
-        ignoreDefaultArgs: ['--enable-automation', '--disable-extensions', '--disable-component-extensions-with-background-pages'],
+        ignoreDefaultArgs: true,
         args,
         ignoreHTTPSErrors: false,
         bypassCSP: false,
         serviceWorkers: 'allow'
       })
 
-      await context.addInitScript(buildFingerprintScript(fp, { publicIp: proxyInfo?.ip }))
+      await context.addInitScript(buildFingerprintScript(fp, { publicIp: proxyInfo?.ip, uaOverride: !nativeUa }))
 
       const entry: Running = { context, bridge, startedAt: Date.now(), state: 'running' }
       this.running.set(profile.id, entry)
       context.on('close', () => this.cleanup(profile.id))
+
+      // With default args ignored, Playwright does not wait for the initial
+      // about:blank tab, so give it a moment to show up.
+      if (!context.pages().length) await context.waitForEvent('page', { timeout: 5000 }).catch(() => null)
 
       const urls = profile.startUrls.filter(Boolean)
       if (!urls.length && settings.defaultStartUrl) urls.push(settings.defaultStartUrl)
@@ -174,6 +226,7 @@ class Launcher extends EventEmitter {
     const ctx = await chromium.launchPersistentContext(dir, {
       executablePath: browser.path,
       headless: true,
+      chromiumSandbox: true,
       args: ['--no-first-run', '--no-default-browser-check'],
       ignoreDefaultArgs: ['--enable-automation']
     })

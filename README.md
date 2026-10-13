@@ -21,6 +21,7 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 - Font list masked per operating system, media device counts, battery masking, Do Not Track
 - UA version is synced to the installed Chrome at launch, so client hints never contradict the UA string
 - `navigator.webdriver` false, no automation banner, native-looking overrides (`toString` returns `[native code]`)
+- Launch flags are kept to the bare minimum (no `--no-sandbox`, none of Playwright's `--disable-features` list). When the profile OS equals the host OS, Chrome sends its own user agent and client hints untouched; language comes from the profile preferences. Cross-OS profiles use a CDP user agent override and are less stealthy.
 
 **Proxy**
 - HTTP, HTTPS, SOCKS4 and SOCKS5 with authentication. Credentials never reach Chromium: a local bridge on 127.0.0.1 opens the upstream connection, so SOCKS5 + password works too

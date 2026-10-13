@@ -29,9 +29,27 @@ const LINUX_CANDIDATES: Array<[string, 'chrome' | 'msedge']> = [
   ['/usr/bin/microsoft-edge', 'msedge']
 ]
 
+const versionCache = new Map<string, string>()
+
 function versionFromInstall(exe: string): string {
+  const cached = versionCache.get(exe)
+  if (cached) return cached
+  const v = readVersion(exe)
+  if (v) versionCache.set(exe, v)
+  return v
+}
+
+function readVersion(exe: string): string {
   try {
     if (process.platform === 'win32') {
+      // The exe's own version is what actually runs; a newer version folder
+      // may already be staged next to it waiting for a restart.
+      try {
+        const out = execFileSync('powershell', ['-NoProfile', '-Command', `(Get-Item '${exe.replace(/'/g, "''")}').VersionInfo.ProductVersion`], { timeout: 8000, windowsHide: true }).toString().trim()
+        if (/^\d+\.\d+\.\d+\.\d+$/.test(out)) return out
+      } catch {
+        /* fall back to folder listing */
+      }
       const dir = path.dirname(exe)
       const versions = fs.readdirSync(dir).filter((d) => /^\d+\.\d+\.\d+\.\d+$/.test(d))
       if (versions.length) return versions.sort((a, b) => cmpVer(b, a))[0]

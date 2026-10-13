@@ -5,7 +5,7 @@ import { launcher } from './browser/launcher'
 import { store } from './store'
 
 // Fixed data location regardless of how the app is started (packaged, `electron .`, or test harness).
-app.setPath('userData', path.join(app.getPath('appData'), 'FacetBrowser'))
+app.setPath('userData', process.env['FACETBROWSER_DATA_DIR'] || path.join(app.getPath('appData'), 'FacetBrowser'))
 
 let mainWindow: BrowserWindow | null = null
 
