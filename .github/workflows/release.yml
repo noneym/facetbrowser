@@ -17,6 +17,8 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      FACET_ADMIN_TOKEN: ${{ secrets.FACET_ADMIN_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,10 +65,8 @@ jobs:
           generate_release_notes: true
 
       - name: Upload to facetbrowser.com
-        if: ${{ secrets.FACET_ADMIN_TOKEN != '' }}
+        if: ${{ env.FACET_ADMIN_TOKEN != '' }}
         shell: bash
-        env:
-          FACET_ADMIN_TOKEN: ${{ secrets.FACET_ADMIN_TOKEN }}
         run: |
           for f in release/FacetBrowser-Setup-*.exe release/FacetBrowser-*-portable.exe; do
             name=$(basename "$f")
