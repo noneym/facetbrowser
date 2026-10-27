@@ -34,8 +34,6 @@ interface WriteOpts {
 
 export function defaultSettings(): Settings {
   return {
-    browserChannel: 'chrome',
-    browserPath: '',
     profilesDir: path.join(app.getPath('userData'), 'profiles'),
     defaultStartUrl: 'https://facetbrowser.com/check',
     getipintelContact: '',
@@ -43,9 +41,7 @@ export function defaultSettings(): Settings {
     proxyCheckConcurrency: 5,
     speedTestBytes: 500000,
     language: 'tr',
-    hideAutomationBar: true,
-    apiBaseUrl: 'https://facetbrowser.com',
-    engine: 'system'
+    apiBaseUrl: 'https://facetbrowser.com'
   }
 }
 

@@ -125,8 +125,6 @@ export interface Group {
 }
 
 export interface Settings {
-  browserChannel: 'chrome' | 'msedge' | 'custom'
-  browserPath: string
   profilesDir: string
   defaultStartUrl: string
   getipintelContact: string
@@ -134,9 +132,7 @@ export interface Settings {
   proxyCheckConcurrency: number
   speedTestBytes: number
   language: 'tr' | 'en'
-  hideAutomationBar: boolean
   apiBaseUrl: string
-  engine: 'system' | 'facet'
 }
 
 export type RunState = 'starting' | 'running' | 'stopping'
@@ -193,9 +189,8 @@ export interface AppInfo {
   version: string
   platform: string
   dataDir: string
-  browserFound: boolean
-  browserPath: string
-  browserVersion: string
+  engineInstalled: boolean
+  engineVersion: string
 }
 
 export interface CookieRecord {

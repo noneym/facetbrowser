@@ -8,12 +8,14 @@ import { ProxiesPage } from '@/pages/ProxiesPage'
 import { CheckerPage } from '@/pages/CheckerPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { AuthScreen } from '@/pages/AuthScreen'
+import { EngineSetup } from '@/pages/EngineSetup'
 import { SkeletonRows } from '@/components/ui'
 
 export default function App(): JSX.Element {
   const ready = useApp((s) => s.ready)
   const page = useApp((s) => s.page)
   const cloud = useApp((s) => s.cloud)
+  const engine = useApp((s) => s.engine)
   const init = useApp((s) => s.init)
 
   useEffect(() => {
@@ -25,6 +27,16 @@ export default function App(): JSX.Element {
       <div className="flex h-full flex-col">
         <div className="drag-region h-10 shrink-0" />
         <div className="min-h-0 flex-1"><AuthScreen /></div>
+        <Toasts />
+      </div>
+    )
+  }
+
+  if (ready && engine && engine.supported && !engine.installed) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="drag-region h-10 shrink-0" />
+        <div className="min-h-0 flex-1"><EngineSetup /></div>
         <Toasts />
       </div>
     )

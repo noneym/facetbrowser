@@ -2,10 +2,9 @@ import { chromium, type BrowserContext } from 'playwright-core'
 import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
-import type { CookieRecord, OsFamily, Profile, ProxyConfig, ProxyCheckResult, RunningProfile, Settings } from '@shared/types'
+import type { CookieRecord, Profile, ProxyConfig, ProxyCheckResult, RunningProfile, Settings } from '@shared/types'
 import { buildFingerprintScript } from './fingerprint-script'
 import { startBridge, type Bridge } from '../proxy/bridge'
-import { detectBrowser } from './chrome-detect'
 import { engine } from './engine'
 
 interface Running {
@@ -22,14 +21,8 @@ export interface LaunchInput {
   settings: Settings
 }
 
-export function hostOs(): OsFamily {
-  return process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux'
-}
-
-// Chrome derives Accept-Language and navigator.languages from this pref, so
-// setting it in the profile is the only way to change the language without a
-// CDP user-agent override (which would also replace client hints).
-function writeLanguagePrefs(userDataDir: string, languages: string[]): void {
+// Chrome derives Accept-Language and navigator.languages from this pref.
+function writeProfilePrefs(userDataDir: string, languages: string[]): void {
   const dir = path.join(userDataDir, 'Default')
   const file = path.join(dir, 'Preferences')
   fs.mkdirSync(dir, { recursive: true })
@@ -43,7 +36,6 @@ function writeLanguagePrefs(userDataDir: string, languages: string[]): void {
   intl.accept_languages = languages.join(',')
   intl.selected_languages = languages.join(',')
   prefs.intl = intl
-  // Skip the "restore pages?" bubble after a non-clean exit.
   const profile = (prefs.profile as Record<string, unknown>) || {}
   profile.exit_type = 'Normal'
   profile.exited_cleanly = true
@@ -52,6 +44,25 @@ function writeLanguagePrefs(userDataDir: string, languages: string[]): void {
   if (bar.show_on_all_tabs === undefined) bar.show_on_all_tabs = false
   prefs.bookmark_bar = bar
   fs.writeFileSync(file, JSON.stringify(prefs), 'utf8')
+}
+
+// fingerprint-chromium flags. The seed derives canvas, WebGL, audio and font
+// noise plus GPU as one coherent identity; the rest comes from the profile.
+export function engineArgs(profile: Profile, timezoneId?: string): string[] {
+  const fp = profile.fingerprint
+  const platform = fp.os === 'macos' ? 'macos' : fp.os === 'linux' ? 'linux' : 'windows'
+  const args = [
+    `--fingerprint=${fp.seed % 2147483647}`,
+    `--fingerprint-platform=${platform}`,
+    '--fingerprint-brand=Chrome',
+    `--fingerprint-hardware-concurrency=${fp.hardwareConcurrency}`,
+    `--accept-lang=${(fp.languages.length ? fp.languages : [fp.locale]).join(',')}`,
+    `--lang=${fp.locale}`
+  ]
+  if (timezoneId) args.push(`--timezone=${timezoneId}`)
+  const off = [fp.canvas === 'real' && 'canvas', fp.webgl.mode === 'real' && 'gpu', fp.audio === 'real' && 'audio', fp.clientRects === 'real' && 'clientrects', fp.fonts === 'real' && 'font'].filter(Boolean)
+  if (off.length) args.push(`--disable-spoofing=${off.join(',')}`)
+  return args
 }
 
 class Launcher extends EventEmitter {
@@ -88,11 +99,8 @@ class Launcher extends EventEmitter {
     const { profile, proxy, proxyInfo, settings } = input
     if (this.running.has(profile.id)) throw new Error('Profile is already running')
 
-    const useEngine = settings.engine === 'facet'
-    const engineExe = useEngine ? engine.exePath() : null
-    if (useEngine && !engineExe) throw new Error('engine_not_installed')
-    const browser = useEngine ? { found: true, path: engineExe as string, version: engine.status().installedVersion || '', channel: 'custom' as const } : detectBrowser(settings)
-    if (!browser.found) throw new Error('No Chromium-based browser found. Set a browser path in Settings.')
+    const exe = engine.exePath()
+    if (!exe) throw new Error('engine_not_installed')
 
     const dir = this.userDataDir(profile, settings)
     fs.mkdirSync(dir, { recursive: true })
@@ -106,14 +114,6 @@ class Launcher extends EventEmitter {
 
     try {
       const fp = profile.fingerprint
-      const major = (browser.version || fp.browserVersion).split('.')[0]
-      // When the profile OS equals the host OS we let Chrome send its own UA
-      // and client hints untouched; everything stays consistent at the
-      // network level. Cross-OS profiles need a CDP override of the UA.
-      // On the engine the UA is produced in C++ from --fingerprint-platform/-brand.
-      const nativeUa = useEngine || fp.os === hostOs()
-      const userAgent = nativeUa ? undefined : fp.userAgent.replace(/Chrome\/\d+(\.\d+)*/, `Chrome/${major}.0.0.0`)
-
       const timezoneId = fp.timezone === 'auto' ? proxyInfo?.timezone || undefined : fp.timezone
       let geolocation: { latitude: number; longitude: number; accuracy?: number } | undefined
       if (fp.geolocation.mode === 'custom' && typeof fp.geolocation.lat === 'number' && typeof fp.geolocation.lon === 'number') {
@@ -122,63 +122,38 @@ class Launcher extends EventEmitter {
         geolocation = { latitude: proxyInfo.lat, longitude: proxyInfo.lon, accuracy: 1500 }
       }
 
-      writeLanguagePrefs(dir, fp.languages.length ? fp.languages : [fp.locale])
+      writeProfilePrefs(dir, fp.languages.length ? fp.languages : [fp.locale])
 
-      // We bypass Playwright's default switch list entirely: it disables
-      // dozens of features (client hint frames, HTTPS upgrades, translate,
-      // background networking...) and adds --no-sandbox, all of which make
-      // the browser look automated. Only the two switches Playwright needs
-      // to talk to the process are kept. No flag from Chrome's "bad flags"
-      // list is used, so no warning bar appears.
+      // Playwright's default switch list is bypassed; only the debugging pipe
+      // and the engine flags are passed, so nothing looks automated.
       const args = [
         `--user-data-dir=${dir}`,
         '--remote-debugging-pipe',
-        // Clears navigator.webdriver (Chrome sets it for any remote debugging
-        // session). --test-type suppresses the "unsupported command-line flag"
-        // bar that this switch would otherwise trigger.
-        '--disable-blink-features=AutomationControlled',
-        '--test-type',
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-search-engine-choice-screen',
         '--disable-session-crashed-bubble',
         '--hide-crash-restore-bubble',
-        `--lang=${fp.locale}`,
-        `--window-size=${Math.min(fp.screen.width, 1600)},${Math.min(fp.screen.height, 1000)}`
+        `--window-size=${Math.min(fp.screen.width, 1600)},${Math.min(fp.screen.height, 1000)}`,
+        ...engineArgs(profile, timezoneId)
       ]
       if (bridge) {
         args.push(`--proxy-server=http://127.0.0.1:${bridge.port}`)
         args.push('--proxy-bypass-list=<-loopback>')
-        if (fp.webrtc !== 'real') args.push('--force-webrtc-ip-handling-policy=disable_non_proxied_udp')
       }
+      if (fp.webrtc === 'real') args.push('--force-webrtc-ip-handling-policy=default')
       const extensions = profile.extensions.filter((e) => e && fs.existsSync(e))
       if (extensions.length) {
         args.push(`--disable-extensions-except=${extensions.join(',')}`)
         args.push(`--load-extension=${extensions.join(',')}`)
       }
-      if (useEngine) {
-        // fingerprint-chromium flags: the seed derives canvas/WebGL/audio/font
-        // noise plus GPU, cores and memory as one coherent identity.
-        const platform = fp.os === 'macos' ? 'macos' : fp.os === 'linux' ? 'linux' : 'windows'
-        args.push(`--fingerprint=${fp.seed % 2147483647}`)
-        args.push(`--fingerprint-platform=${platform}`)
-        args.push('--fingerprint-brand=Chrome')
-        args.push(`--fingerprint-hardware-concurrency=${fp.hardwareConcurrency}`)
-        if (timezoneId) args.push(`--timezone=${timezoneId}`)
-        args.push(`--accept-lang=${(fp.languages.length ? fp.languages : [fp.locale]).join(',')}`)
-        if (fp.canvas === 'real' || fp.webgl.mode === 'real' || fp.audio === 'real' || fp.clientRects === 'real' || fp.fonts === 'real') {
-          const off = [fp.canvas === 'real' && 'canvas', fp.webgl.mode === 'real' && 'gpu', fp.audio === 'real' && 'audio', fp.clientRects === 'real' && 'clientrects', fp.fonts === 'real' && 'font'].filter(Boolean)
-          args.push(`--disable-spoofing=${off.join(',')}`)
-        }
-      }
       args.push('about:blank')
 
       const context = await chromium.launchPersistentContext(dir, {
-        executablePath: browser.path,
+        executablePath: exe,
         headless: false,
         chromiumSandbox: true,
         viewport: null,
-        userAgent,
         timezoneId,
         geolocation,
         permissions: geolocation ? ['geolocation'] : [],
@@ -189,14 +164,12 @@ class Launcher extends EventEmitter {
         serviceWorkers: 'allow'
       })
 
-      await context.addInitScript(buildFingerprintScript(fp, { publicIp: proxyInfo?.ip, uaOverride: !nativeUa, engineMode: useEngine }))
+      await context.addInitScript(buildFingerprintScript(fp, { publicIp: proxyInfo?.ip }))
 
       const entry: Running = { context, bridge, startedAt: Date.now(), state: 'running' }
       this.running.set(profile.id, entry)
       context.on('close', () => this.cleanup(profile.id))
 
-      // With default args ignored, Playwright does not wait for the initial
-      // about:blank tab, so give it a moment to show up.
       if (!context.pages().length) await context.waitForEvent('page', { timeout: 5000 }).catch(() => null)
 
       const urls = profile.startUrls.filter(Boolean)
@@ -245,20 +218,19 @@ class Launcher extends EventEmitter {
 
   // ---- cookies ---------------------------------------------------------
   // While a profile runs we talk to the live context. Otherwise the profile
-  // directory is opened in a short-lived headless context.
+  // directory is opened in a short-lived headless engine context.
   private async withContext<T>(profile: Profile, settings: Settings, fn: (ctx: BrowserContext) => Promise<T>): Promise<T> {
     const live = this.running.get(profile.id)
     if (live && live.state === 'running') return fn(live.context)
-    const engineExe = settings.engine === 'facet' ? engine.exePath() : null
-    const browser = engineExe ? { found: true, path: engineExe } : detectBrowser(settings)
-    if (!browser.found) throw new Error('No browser found')
+    const exe = engine.exePath()
+    if (!exe) throw new Error('engine_not_installed')
     const dir = this.userDataDir(profile, settings)
     fs.mkdirSync(dir, { recursive: true })
     const ctx = await chromium.launchPersistentContext(dir, {
-      executablePath: browser.path,
+      executablePath: exe,
       headless: true,
       chromiumSandbox: true,
-      args: ['--no-first-run', '--no-default-browser-check'],
+      args: ['--no-first-run', '--no-default-browser-check', ...engineArgs(profile)],
       ignoreDefaultArgs: ['--enable-automation']
     })
     try {

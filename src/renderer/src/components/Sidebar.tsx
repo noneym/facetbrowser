@@ -55,14 +55,14 @@ export function Sidebar(): JSX.Element {
             <span className="font-mono text-fg">{running.length}</span> {t('nav.running')}
           </div>
         )}
-        {info && !info.browserFound && (
+        {info && !info.engineInstalled && (
           <button onClick={() => setPage('settings')} className="flex items-center gap-2 text-warn hover:underline">
-            <Warning size={14} /> {t('nav.browserMissing')}
+            <Warning size={14} /> {t('nav.engineMissing')}
           </button>
         )}
-        {info && info.browserFound && (
-          <div className="truncate text-fg-faint" title={info.browserPath}>
-            {t('nav.browser')}: <span className="font-mono">{info.browserVersion.split('.')[0] || '?'}</span>
+        {info && info.engineInstalled && (
+          <div className="truncate text-fg-faint">
+            {t('nav.engine')}: <span className="font-mono">{info.engineVersion.split('.').slice(0, 1)[0] || '?'}</span>
           </div>
         )}
       </div>

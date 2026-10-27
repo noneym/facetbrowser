@@ -64,7 +64,7 @@ export const useApp = create<AppState>((set, get) => ({
     ])
     useI18n.getState().setLang(settings.language)
     set({ settings, profiles, proxies, groups, running, info, cloud, engine, ready: true })
-    window.api.engine.onStatus((engine) => set({ engine }))
+    window.api.engine.onStatus((engine) => { set({ engine }); get().refreshInfo() })
     window.api.browser.onStatus((running) => {
       set({ running })
       get().refreshProfiles()
@@ -93,7 +93,6 @@ export const useApp = create<AppState>((set, get) => ({
     const settings = await window.api.settings.set(patch)
     if (patch.language) useI18n.getState().setLang(patch.language)
     set({ settings })
-    if (patch.browserChannel !== undefined || patch.browserPath !== undefined) get().refreshInfo()
   },
   openEditor: (p, isNew) => set({ editorProfile: p, editorIsNew: isNew }),
   closeEditor: () => set({ editorProfile: null, editorIsNew: false }),

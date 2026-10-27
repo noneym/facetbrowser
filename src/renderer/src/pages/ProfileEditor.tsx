@@ -296,9 +296,6 @@ function ProxyTab({ draft, patch, patchFp }: { draft: Profile; patch: (p: Partia
 
 function FingerprintTab({ fp, patchFp, setFp }: { fp: Fingerprint; patchFp: (p: Partial<Fingerprint>) => void; setFp: (fp: Fingerprint) => void }): JSX.Element {
   const t = useT()
-  const info = useApp((s) => s.info)
-  const engineOn = useApp((s) => s.settings?.engine === 'facet' && !!s.engine?.installed)
-  const hostOs: OsFamily = info?.platform === 'win32' ? 'windows' : info?.platform === 'darwin' ? 'macos' : 'linux'
   const [regen, setRegen] = useState(false)
   const regenerate = async (os?: OsFamily): Promise<void> => {
     setRegen(true)
@@ -317,31 +314,18 @@ function FingerprintTab({ fp, patchFp, setFp }: { fp: Fingerprint; patchFp: (p: 
       <div className="flex items-center justify-between gap-3">
         <Field label={t('fp.os')} className="w-48">
           <Select value={fp.os} onChange={(e) => regenerate(e.target.value as OsFamily)}>
-            {(['windows', 'macos', 'linux', 'android'] as OsFamily[]).map((o) => <option key={o} value={o}>{osLabel(o)}</option>)}
+            {(['windows', 'macos', 'linux'] as OsFamily[]).map((o) => <option key={o} value={o}>{osLabel(o)}</option>)}
           </Select>
         </Field>
         <Button icon={<Lightning size={14} weight="fill" />} loading={regen} onClick={() => regenerate()}>{t('fp.regenerate')}</Button>
       </div>
 
       <Group title={t('fp.section.identity')}>
-        <p className={cx('rounded-[var(--radius-md)] border px-3 py-2 text-[12px] leading-relaxed', engineOn || fp.os === hostOs ? 'border-ok/30 bg-ok/8 text-ok' : 'border-warn/30 bg-warn/8 text-warn')}>
-          {engineOn ? t('engine.noteEditor') : fp.os === hostOs ? t('fp.nativeNote') : t('fp.crossOsNote')}
-        </p>
-        <Field label={t('fp.userAgent')} hint={t('fp.uaHint')}>
-          <Input value={fp.userAgent} onChange={(e) => patchFp({ userAgent: e.target.value })} className="font-mono text-[12px]" />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={t('fp.webglVendor')}><Input value={fp.webgl.vendor} onChange={(e) => patchFp({ webgl: { ...fp.webgl, vendor: e.target.value } })} className="font-mono text-[12px]" /></Field>
-          <Field label={t('fp.webglRenderer')}><Input value={fp.webgl.renderer} onChange={(e) => patchFp({ webgl: { ...fp.webgl, renderer: e.target.value } })} className="font-mono text-[12px]" /></Field>
-        </div>
+        <p className="rounded-[var(--radius-md)] border border-ok/30 bg-ok/8 px-3 py-2 text-[12px] leading-relaxed text-ok">{t('engine.noteEditor')}</p>
       </Group>
 
       <Group title={t('fp.section.hw')}>
         <div className="grid grid-cols-4 gap-3">
-          <Field label={`${t('fp.screen')} W`}><Input type="number" value={fp.screen.width} onChange={(e) => patchFp({ screen: { ...fp.screen, width: Number(e.target.value) || 0 } })} className="font-mono" /></Field>
-          <Field label={`${t('fp.screen')} H`}><Input type="number" value={fp.screen.height} onChange={(e) => patchFp({ screen: { ...fp.screen, height: Number(e.target.value) || 0 } })} className="font-mono" /></Field>
-          <Field label={t('fp.pixelRatio')}><Input type="number" step={0.25} value={fp.screen.pixelRatio} onChange={(e) => patchFp({ screen: { ...fp.screen, pixelRatio: Number(e.target.value) || 1 } })} className="font-mono" /></Field>
-          <Field label={t('fp.touch')}><Input type="number" value={fp.maxTouchPoints} onChange={(e) => patchFp({ maxTouchPoints: Number(e.target.value) || 0 })} className="font-mono" /></Field>
           <Field label={t('fp.cores')}>
             <Select value={fp.hardwareConcurrency} onChange={(e) => patchFp({ hardwareConcurrency: Number(e.target.value) })}>{[2, 4, 6, 8, 10, 12, 16, 24, 32].map((n) => <option key={n} value={n}>{n}</option>)}</Select>
           </Field>

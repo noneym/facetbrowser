@@ -7,8 +7,7 @@ import type {
 import { store, uid } from './store'
 import { generateFingerprint, reseed } from './fingerprint/generator'
 import { COUNTRY_LOCALES, PROFILE_COLORS } from './fingerprint/data'
-import { hostOs, launcher } from './browser/launcher'
-import { detectBrowser } from './browser/chrome-detect'
+import { launcher } from './browser/launcher'
 import { engine } from './browser/engine'
 import { checkProxy, pool } from './proxy/checker'
 import { parseProxyLine, parseProxyList } from './proxy/parse'
@@ -35,24 +34,21 @@ function resolveProxy(profile: Profile): { config: ProxyConfig | null; info?: Pr
   return { config: null }
 }
 
-// Profiles that claim the host OS get the real screen geometry so window
-// size, screen size and pixel ratio never contradict each other.
+// The engine reports the host screen, so the profile records the real
+// geometry; the Chromium version comes from the installed engine build.
 function generateForHost(opts: GenerateFingerprintOptions): Fingerprint {
-  const fp = generateFingerprint(opts)
-  if (fp.os === hostOs()) {
-    try {
-      const d = screen.getPrimaryDisplay()
-      fp.screen = { width: d.size.width, height: d.size.height, colorDepth: 24, pixelRatio: d.scaleFactor }
-    } catch {
-      /* keep generated */
-    }
+  const fp = generateFingerprint({ browserVersion: engine.status().installedVersion || undefined, ...opts })
+  try {
+    const d = screen.getPrimaryDisplay()
+    fp.screen = { width: d.size.width, height: d.size.height, colorDepth: 24, pixelRatio: d.scaleFactor }
+  } catch {
+    /* keep generated */
   }
   return fp
 }
 
 export function newProfile(partial: Partial<Profile> = {}): Profile {
   const s = store()
-  const browser = detectBrowser(s.settings)
   const now = Date.now()
   const idx = s.profiles.length
   return {
@@ -63,7 +59,7 @@ export function newProfile(partial: Partial<Profile> = {}): Profile {
     color: PROFILE_COLORS[idx % PROFILE_COLORS.length],
     favorite: false,
     proxy: { mode: 'none' },
-    fingerprint: generateForHost({ browserVersion: browser.version || undefined }),
+    fingerprint: generateForHost({}),
     startUrls: [],
     extensions: [],
     createdAt: now,
@@ -86,8 +82,8 @@ export function registerIpc(): void {
 
   // ---- app ---------------------------------------------------------------
   ipcMain.handle('app:info', (): AppInfo => {
-    const b = detectBrowser(s.settings)
-    return { version: app.getVersion(), platform: process.platform, dataDir: app.getPath('userData'), browserFound: b.found, browserPath: b.path, browserVersion: b.version }
+    const e = engine.status()
+    return { version: app.getVersion(), platform: process.platform, dataDir: app.getPath('userData'), engineInstalled: e.installed, engineVersion: e.installedVersion || '' }
   })
   ipcMain.handle('app:openPath', (_e, p: string) => shell.openPath(p))
   ipcMain.handle('app:openExternal', (_e, url: string) => shell.openExternal(url))
@@ -198,10 +194,7 @@ export function registerIpc(): void {
   })
 
   // ---- fingerprint ------------------------------------------------------
-  ipcMain.handle('fingerprint:generate', (_e, opts: GenerateFingerprintOptions) => {
-    const browser = detectBrowser(s.settings)
-    return generateForHost({ browserVersion: browser.version || undefined, ...opts })
-  })
+  ipcMain.handle('fingerprint:generate', (_e, opts: GenerateFingerprintOptions) => generateForHost(opts))
   ipcMain.handle('fingerprint:adaptToProxy', (_e, profile: Profile) => {
     const { info } = resolveProxy(profile)
     if (!info || !info.countryCode) throw new Error('Proxy has no check result yet. Run a proxy check first.')
