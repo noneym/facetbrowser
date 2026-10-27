@@ -1,0 +1,76 @@
+name: Release
+
+# Push a tag like v0.1.1 and this builds the Windows installer + portable exe,
+# publishes them as a GitHub Release and uploads them to facetbrowser.com.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.1.1)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Resolve version from tag
+        id: ver
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Set package version
+        shell: bash
+        run: npm version "${{ steps.ver.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Build
+        run: npm run build
+
+      - name: Package
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: List artifacts
+        shell: bash
+        run: ls -la release/*.exe
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: FacetBrowser ${{ steps.ver.outputs.tag }}
+          files: |
+            release/FacetBrowser-Setup-*.exe
+            release/FacetBrowser-*-portable.exe
+          generate_release_notes: true
+
+      - name: Upload to facetbrowser.com
+        if: ${{ env.FACET_ADMIN_TOKEN != '' }}
+        shell: bash
+        env:
+          FACET_ADMIN_TOKEN: ${{ secrets.FACET_ADMIN_TOKEN }}
+        run: |
+          for f in release/FacetBrowser-Setup-*.exe release/FacetBrowser-*-portable.exe; do
+            name=$(basename "$f")
+            echo "uploading $name"
+            curl --fail -sS -T "$f" -H "x-admin-token: $FACET_ADMIN_TOKEN" "https://facetbrowser.com/api/admin/releases/$name"
+            echo
+          done
