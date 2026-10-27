@@ -6,6 +6,7 @@ import type { CookieRecord, OsFamily, Profile, ProxyConfig, ProxyCheckResult, Ru
 import { buildFingerprintScript } from './fingerprint-script'
 import { startBridge, type Bridge } from '../proxy/bridge'
 import { detectBrowser } from './chrome-detect'
+import { engine } from './engine'
 
 interface Running {
   context: BrowserContext
@@ -47,6 +48,9 @@ function writeLanguagePrefs(userDataDir: string, languages: string[]): void {
   profile.exit_type = 'Normal'
   profile.exited_cleanly = true
   prefs.profile = profile
+  const bar = (prefs.bookmark_bar as Record<string, unknown>) || {}
+  if (bar.show_on_all_tabs === undefined) bar.show_on_all_tabs = false
+  prefs.bookmark_bar = bar
   fs.writeFileSync(file, JSON.stringify(prefs), 'utf8')
 }
 
@@ -84,7 +88,10 @@ class Launcher extends EventEmitter {
     const { profile, proxy, proxyInfo, settings } = input
     if (this.running.has(profile.id)) throw new Error('Profile is already running')
 
-    const browser = detectBrowser(settings)
+    const useEngine = settings.engine === 'facet'
+    const engineExe = useEngine ? engine.exePath() : null
+    if (useEngine && !engineExe) throw new Error('engine_not_installed')
+    const browser = useEngine ? { found: true, path: engineExe as string, version: engine.status().installedVersion || '', channel: 'custom' as const } : detectBrowser(settings)
     if (!browser.found) throw new Error('No Chromium-based browser found. Set a browser path in Settings.')
 
     const dir = this.userDataDir(profile, settings)
@@ -103,7 +110,8 @@ class Launcher extends EventEmitter {
       // When the profile OS equals the host OS we let Chrome send its own UA
       // and client hints untouched; everything stays consistent at the
       // network level. Cross-OS profiles need a CDP override of the UA.
-      const nativeUa = fp.os === hostOs()
+      // On the engine the UA is produced in C++ from --fingerprint-platform/-brand.
+      const nativeUa = useEngine || fp.os === hostOs()
       const userAgent = nativeUa ? undefined : fp.userAgent.replace(/Chrome\/\d+(\.\d+)*/, `Chrome/${major}.0.0.0`)
 
       const timezoneId = fp.timezone === 'auto' ? proxyInfo?.timezone || undefined : fp.timezone
@@ -148,6 +156,21 @@ class Launcher extends EventEmitter {
         args.push(`--disable-extensions-except=${extensions.join(',')}`)
         args.push(`--load-extension=${extensions.join(',')}`)
       }
+      if (useEngine) {
+        // fingerprint-chromium flags: the seed derives canvas/WebGL/audio/font
+        // noise plus GPU, cores and memory as one coherent identity.
+        const platform = fp.os === 'macos' ? 'macos' : fp.os === 'linux' ? 'linux' : 'windows'
+        args.push(`--fingerprint=${fp.seed % 2147483647}`)
+        args.push(`--fingerprint-platform=${platform}`)
+        args.push('--fingerprint-brand=Chrome')
+        args.push(`--fingerprint-hardware-concurrency=${fp.hardwareConcurrency}`)
+        if (timezoneId) args.push(`--timezone=${timezoneId}`)
+        args.push(`--accept-lang=${(fp.languages.length ? fp.languages : [fp.locale]).join(',')}`)
+        if (fp.canvas === 'real' || fp.webgl.mode === 'real' || fp.audio === 'real' || fp.clientRects === 'real' || fp.fonts === 'real') {
+          const off = [fp.canvas === 'real' && 'canvas', fp.webgl.mode === 'real' && 'gpu', fp.audio === 'real' && 'audio', fp.clientRects === 'real' && 'clientrects', fp.fonts === 'real' && 'font'].filter(Boolean)
+          args.push(`--disable-spoofing=${off.join(',')}`)
+        }
+      }
       args.push('about:blank')
 
       const context = await chromium.launchPersistentContext(dir, {
@@ -166,7 +189,7 @@ class Launcher extends EventEmitter {
         serviceWorkers: 'allow'
       })
 
-      await context.addInitScript(buildFingerprintScript(fp, { publicIp: proxyInfo?.ip, uaOverride: !nativeUa }))
+      await context.addInitScript(buildFingerprintScript(fp, { publicIp: proxyInfo?.ip, uaOverride: !nativeUa, engineMode: useEngine }))
 
       const entry: Running = { context, bridge, startedAt: Date.now(), state: 'running' }
       this.running.set(profile.id, entry)
@@ -226,7 +249,8 @@ class Launcher extends EventEmitter {
   private async withContext<T>(profile: Profile, settings: Settings, fn: (ctx: BrowserContext) => Promise<T>): Promise<T> {
     const live = this.running.get(profile.id)
     if (live && live.state === 'running') return fn(live.context)
-    const browser = detectBrowser(settings)
+    const engineExe = settings.engine === 'facet' ? engine.exePath() : null
+    const browser = engineExe ? { found: true, path: engineExe } : detectBrowser(settings)
     if (!browser.found) throw new Error('No browser found')
     const dir = this.userDataDir(profile, settings)
     fs.mkdirSync(dir, { recursive: true })
@@ -275,9 +299,22 @@ class Launcher extends EventEmitter {
     return this.withContext(profile, settings, async (ctx) => (await ctx.cookies()).length)
   }
 
-  deleteProfileData(profile: Profile, settings: Settings): void {
+  // Chromium keeps a few files locked for a moment after the window closes;
+  // retry instead of failing the delete on Windows.
+  async deleteProfileData(profile: Profile, settings: Settings): Promise<void> {
     const dir = this.userDataDir(profile, settings)
-    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true })
+    if (!fs.existsSync(dir)) return
+    let lastErr: unknown = null
+    for (let i = 0; i < 12; i++) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+        return
+      } catch (e) {
+        lastErr = e
+        await new Promise((r) => setTimeout(r, 500))
+      }
+    }
+    throw lastErr
   }
 
   copyProfileData(src: Profile, dst: Profile, settings: Settings): void {

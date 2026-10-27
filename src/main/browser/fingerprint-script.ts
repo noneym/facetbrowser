@@ -6,6 +6,10 @@ export interface ScriptContext {
   // navigator identity is then left untouched so JS, headers and client
   // hints all agree.
   uaOverride?: boolean
+  // true when running on the FacetBrowser Engine: canvas/WebGL/audio/fonts/UA
+  // are handled in C++, so only WebRTC, media devices, battery and the
+  // deviceMemory cap are applied from JS.
+  engineMode?: boolean
 }
 
 // Builds the JavaScript that is injected into every frame before any page
@@ -35,7 +39,8 @@ export function buildFingerprintScript(fp: Fingerprint, ctx: ScriptContext = {})
     batteryMask: fp.batteryMask,
     geolocationOff: fp.geolocation.mode === 'off',
     publicIp: ctx.publicIp || null,
-    uaOverride: ctx.uaOverride !== false
+    uaOverride: ctx.uaOverride !== false && !ctx.engineMode,
+    engineMode: !!ctx.engineMode
   })
 
   return `(() => {
@@ -89,13 +94,15 @@ export function buildFingerprintScript(fp: Fingerprint, ctx: ScriptContext = {})
     defineGetter(N, 'language', C.languages[0]);
     defineGetter(N, 'languages', () => Object.freeze(C.languages.slice()));
   }
-  defineGetter(N, 'hardwareConcurrency', C.hardwareConcurrency);
-  defineGetter(N, 'deviceMemory', C.deviceMemory);
+  if (!C.engineMode) defineGetter(N, 'hardwareConcurrency', C.hardwareConcurrency);
+  // Real Chrome never reports more than 8 GB; the engine passes raw memory through.
+  defineGetter(N, 'deviceMemory', Math.min(8, C.deviceMemory));
   defineGetter(N, 'maxTouchPoints', C.maxTouchPoints);
   if (C.doNotTrack !== null) defineGetter(N, 'doNotTrack', C.doNotTrack ? '1' : null);
 
   // ---- screen ------------------------------------------------------------
   const S = Screen.prototype;
+  if (C.engineMode) { /* engine reports the host screen; keep it */ } else {
   const availH = C.os === 'windows' ? C.screen.height - 40 : C.os === 'macos' ? C.screen.height - 25 : C.screen.height;
   defineGetter(S, 'width', C.screen.width);
   defineGetter(S, 'height', C.screen.height);
@@ -106,6 +113,7 @@ export function buildFingerprintScript(fp: Fingerprint, ctx: ScriptContext = {})
   defineGetter(S, 'colorDepth', C.screen.colorDepth);
   defineGetter(S, 'pixelDepth', C.screen.colorDepth);
   defineGetter(window, 'devicePixelRatio', C.screen.pixelRatio);
+  }
 
   // ---- battery -----------------------------------------------------------
   if (C.batteryMask && N.getBattery) {
@@ -165,11 +173,13 @@ export function buildFingerprintScript(fp: Fingerprint, ctx: ScriptContext = {})
       });
     }
   };
-  patchGl(window.WebGLRenderingContext && WebGLRenderingContext.prototype);
-  patchGl(window.WebGL2RenderingContext && WebGL2RenderingContext.prototype);
+  if (!C.engineMode) {
+    patchGl(window.WebGLRenderingContext && WebGLRenderingContext.prototype);
+    patchGl(window.WebGL2RenderingContext && WebGL2RenderingContext.prototype);
+  }
 
   // ---- Canvas ------------------------------------------------------------
-  if (C.canvas === 'noise') {
+  if (C.engineMode) { /* canvas handled by the engine */ } else if (C.canvas === 'noise') {
     const perturb = (data) => {
       const len = data.length;
       const step = Math.max(4, Math.floor(len / 512) & ~3);
@@ -211,7 +221,7 @@ export function buildFingerprintScript(fp: Fingerprint, ctx: ScriptContext = {})
   }
 
   // ---- Audio -------------------------------------------------------------
-  if (C.audio === 'noise' && window.AudioBuffer) {
+  if (!C.engineMode && C.audio === 'noise' && window.AudioBuffer) {
     replaceMethod(AudioBuffer.prototype, 'getChannelData', function (orig, args) {
       const d = orig.apply(this, args);
       if (!d.__fb) {
@@ -234,7 +244,7 @@ export function buildFingerprintScript(fp: Fingerprint, ctx: ScriptContext = {})
   }
 
   // ---- Client rects ------------------------------------------------------
-  if (C.clientRects === 'noise') {
+  if (!C.engineMode && C.clientRects === 'noise') {
     const jitter = (v, i) => v + (noiseTable[(Math.abs(Math.floor(v * 10)) + i) % noiseTable.length] - 0.5) * 1e-4;
     const wrapRect = (r, i) => {
       if (!r) return r;
@@ -253,7 +263,7 @@ export function buildFingerprintScript(fp: Fingerprint, ctx: ScriptContext = {})
   }
 
   // ---- Fonts -------------------------------------------------------------
-  if (C.fonts === 'mask' && document.fonts && document.fonts.check) {
+  if (!C.engineMode && C.fonts === 'mask' && document.fonts && document.fonts.check) {
     const allow = {
       windows: ['Arial', 'Arial Black', 'Bahnschrift', 'Calibri', 'Cambria', 'Cambria Math', 'Candara', 'Comic Sans MS', 'Consolas', 'Constantia', 'Corbel', 'Courier New', 'Ebrima', 'Franklin Gothic Medium', 'Gabriola', 'Gadugi', 'Georgia', 'Impact', 'Lucida Console', 'Lucida Sans Unicode', 'Malgun Gothic', 'Microsoft Sans Serif', 'MS Gothic', 'MV Boli', 'Palatino Linotype', 'Segoe Print', 'Segoe Script', 'Segoe UI', 'Segoe UI Symbol', 'SimSun', 'Sylfaen', 'Symbol', 'Tahoma', 'Times New Roman', 'Trebuchet MS', 'Verdana', 'Webdings', 'Wingdings', 'Yu Gothic'],
       macos: ['American Typewriter', 'Andale Mono', 'Arial', 'Arial Black', 'Avenir', 'Avenir Next', 'Baskerville', 'Chalkboard', 'Cochin', 'Comic Sans MS', 'Courier', 'Courier New', 'Didot', 'Futura', 'Geneva', 'Georgia', 'Gill Sans', 'Helvetica', 'Helvetica Neue', 'Hoefler Text', 'Impact', 'Lucida Grande', 'Menlo', 'Monaco', 'Optima', 'Palatino', 'Papyrus', 'Skia', 'Tahoma', 'Times', 'Times New Roman', 'Trebuchet MS', 'Verdana', 'Zapfino'],

@@ -297,6 +297,7 @@ function ProxyTab({ draft, patch, patchFp }: { draft: Profile; patch: (p: Partia
 function FingerprintTab({ fp, patchFp, setFp }: { fp: Fingerprint; patchFp: (p: Partial<Fingerprint>) => void; setFp: (fp: Fingerprint) => void }): JSX.Element {
   const t = useT()
   const info = useApp((s) => s.info)
+  const engineOn = useApp((s) => s.settings?.engine === 'facet' && !!s.engine?.installed)
   const hostOs: OsFamily = info?.platform === 'win32' ? 'windows' : info?.platform === 'darwin' ? 'macos' : 'linux'
   const [regen, setRegen] = useState(false)
   const regenerate = async (os?: OsFamily): Promise<void> => {
@@ -323,8 +324,8 @@ function FingerprintTab({ fp, patchFp, setFp }: { fp: Fingerprint; patchFp: (p: 
       </div>
 
       <Group title={t('fp.section.identity')}>
-        <p className={cx('rounded-[var(--radius-md)] border px-3 py-2 text-[12px] leading-relaxed', fp.os === hostOs ? 'border-ok/30 bg-ok/8 text-ok' : 'border-warn/30 bg-warn/8 text-warn')}>
-          {fp.os === hostOs ? t('fp.nativeNote') : t('fp.crossOsNote')}
+        <p className={cx('rounded-[var(--radius-md)] border px-3 py-2 text-[12px] leading-relaxed', engineOn || fp.os === hostOs ? 'border-ok/30 bg-ok/8 text-ok' : 'border-warn/30 bg-warn/8 text-warn')}>
+          {engineOn ? t('engine.noteEditor') : fp.os === hostOs ? t('fp.nativeNote') : t('fp.crossOsNote')}
         </p>
         <Field label={t('fp.userAgent')} hint={t('fp.uaHint')}>
           <Input value={fp.userAgent} onChange={(e) => patchFp({ userAgent: e.target.value })} className="font-mono text-[12px]" />

@@ -136,6 +136,7 @@ export interface Settings {
   language: 'tr' | 'en'
   hideAutomationBar: boolean
   apiBaseUrl: string
+  engine: 'system' | 'facet'
 }
 
 export type RunState = 'starting' | 'running' | 'stopping'
@@ -175,6 +176,17 @@ export interface ProfileExport {
   profiles: Profile[]
   proxies: SavedProxy[]
   groups: Group[]
+}
+
+export interface EngineStatus {
+  supported: boolean
+  installed: boolean
+  installedVersion: string | null
+  exePath: string | null
+  latest: { version: string; file: string; url: string } | null
+  downloading: boolean
+  progress: number
+  error: string | null
 }
 
 export interface AppInfo {

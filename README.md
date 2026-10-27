@@ -13,6 +13,11 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 - Import / export profiles as JSON, import / export cookies (Playwright JSON, EditThisCookie, Netscape cookies.txt)
 - Start pages and unpacked extensions per profile
 
+**FacetBrowser Engine** (optional, Windows x64)
+- A Chromium build based on [fingerprint-chromium](https://github.com/adryfish/fingerprint-chromium) (BSD-3-Clause) that spoofs canvas, WebGL, audio, fonts, GPU, cores and the user agent at the C++ level and reports `navigator.webdriver` as false, so no JavaScript injection is needed
+- Downloaded on demand from Settings (about 190 MB); profiles then launch with `--fingerprint=<seed>`, `--fingerprint-platform`, `--fingerprint-brand=Chrome`, `--timezone` and `--accept-lang` derived from the profile
+- The installed Chrome / Edge remains available as the second engine
+
 **Fingerprint**
 - Consistent generator: OS, user agent, platform, screen, pixel ratio, GPU (WebGL vendor / renderer), CPU cores, memory, touch points, languages, locale
 - Seeded noise for Canvas, WebGL, AudioContext and ClientRects: stable for one profile, different across profiles

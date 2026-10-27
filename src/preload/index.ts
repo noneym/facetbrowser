@@ -3,6 +3,7 @@ import type {
   AppInfo, BatchCheckOptions, BatchItemEvent, CookieRecord, Fingerprint, GenerateFingerprintOptions, Group, Profile,
   ProxyCheckResult, ProxyConfig, RunningProfile, SavedProxy, Settings
 } from '@shared/types'
+import type { EngineStatus } from '@shared/types'
 import type { CloudStatus, ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerateOptions } from '@shared/cloud'
 
 type Listener<T> = (payload: T) => void
@@ -65,6 +66,12 @@ const api = {
     checkConfig: (cfg: ProxyConfig): Promise<ProxyCheckResult> => ipcRenderer.invoke('proxies:checkConfig', cfg),
     onChecking: (cb: Listener<{ id: string; stage: string }>) => on('proxies:checking', cb),
     onChecked: (cb: Listener<{ id: string; result: ProxyCheckResult }>) => on('proxies:checked', cb)
+  },
+  engine: {
+    status: (): Promise<EngineStatus> => ipcRenderer.invoke('engine:status'),
+    install: (): Promise<EngineStatus> => ipcRenderer.invoke('engine:install'),
+    remove: (): Promise<EngineStatus> => ipcRenderer.invoke('engine:remove'),
+    onStatus: (cb: Listener<EngineStatus>) => on('engine:status', cb)
   },
   cloud: {
     status: (): Promise<CloudStatus> => ipcRenderer.invoke('cloud:status'),

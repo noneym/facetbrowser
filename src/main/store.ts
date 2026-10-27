@@ -44,7 +44,8 @@ export function defaultSettings(): Settings {
     speedTestBytes: 500000,
     language: 'tr',
     hideAutomationBar: true,
-    apiBaseUrl: 'https://facetbrowser.com'
+    apiBaseUrl: 'https://facetbrowser.com',
+    engine: 'system'
   }
 }
 

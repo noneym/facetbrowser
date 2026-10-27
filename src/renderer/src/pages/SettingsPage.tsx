@@ -40,6 +40,8 @@ export function SettingsPage(): JSX.Element {
 
         <AccountSection />
 
+        <EngineSection draft={draft} set={set} />
+
         <Section title={t('settings.browser')} hint={t('settings.browserHint')}>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label={t('settings.channel')}>
@@ -123,6 +125,61 @@ export function SettingsPage(): JSX.Element {
         </Section>
       </div>
     </div>
+  )
+}
+
+function EngineSection({ draft, set }: { draft: Settings; set: <K extends keyof Settings>(k: K, v: Settings[K]) => void }): JSX.Element {
+  const t = useT()
+  const engine = useApp((s) => s.engine)
+  const setEngine = useApp((s) => s.setEngine)
+  const [busy, setBusy] = useState(false)
+  const install = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const st = await window.api.engine.install()
+      setEngine(st)
+      toast.ok(t('engine.done'))
+      set('engine', 'facet')
+    } catch (e) {
+      toast.err(String((e as Error).message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const supported = engine?.supported ?? false
+  return (
+    <Section title={t('engine.title')} hint={t('engine.hint')}>
+      {!supported && <p className="text-[12.5px] text-warn">{t('engine.unsupported')}</p>}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {([['facet', t('engine.facet')], ['system', t('engine.system')]] as Array<['facet' | 'system', string]>).map(([id, label]) => (
+          <button key={id} type="button" disabled={id === 'facet' && (!supported || !engine?.installed)} onClick={() => set('engine', id)}
+            className={`focus-ring flex items-start gap-3 rounded-[var(--radius-md)] border px-3 py-3 text-left transition-colors disabled:opacity-50 ${draft.engine === id ? 'border-accent/60 bg-surface-2' : 'border-line bg-bg hover:border-line-strong'}`}>
+            <span className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full border ${draft.engine === id ? 'border-accent bg-accent' : 'border-line-strong'}`} />
+            <span className="text-[13px] font-medium">{label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] border border-line bg-bg px-3 py-2.5 text-[12.5px]">
+        {engine?.installed ? (
+          <span>{t('engine.installed')}: <span className="font-mono text-fg">{engine.installedVersion}</span></span>
+        ) : (
+          <span className="text-fg-muted">{t('engine.notInstalled')}</span>
+        )}
+        {engine?.downloading && (
+          <span className="flex items-center gap-2 text-fg-muted">
+            <span className="inline-block h-1 w-32 overflow-hidden rounded-full bg-line"><span className="block h-full bg-accent" style={{ width: `${Math.round((engine.progress || 0) * 100)}%` }} /></span>
+            {t('engine.installing')} {Math.round((engine.progress || 0) * 100)}%
+          </span>
+        )}
+        {engine?.error && <span className="text-bad">{engine.error}</span>}
+        <span className="ml-auto flex gap-2">
+          {supported && !engine?.downloading && (
+            <Button size="sm" variant={engine?.installed ? 'secondary' : 'primary'} loading={busy} onClick={install}>{engine?.installed && engine.latest && engine.latest.version !== engine.installedVersion ? `${t('engine.install')} ${engine.latest.version}` : t('engine.install')}</Button>
+          )}
+          {engine?.installed && !engine.downloading && <Button size="sm" variant="ghost" onClick={async () => { setEngine(await window.api.engine.remove()); set('engine', 'system') }}>{t('engine.remove')}</Button>}
+        </span>
+      </div>
+    </Section>
   )
 }
 

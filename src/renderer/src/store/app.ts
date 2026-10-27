@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppInfo, Group, Profile, ProxyCheckResult, RunningProfile, SavedProxy, Settings } from '@shared/types'
+import type { AppInfo, EngineStatus, Group, Profile, ProxyCheckResult, RunningProfile, SavedProxy, Settings } from '@shared/types'
 import type { CloudStatus } from '@shared/cloud'
 import { useI18n } from '@/lib/i18n'
 
@@ -18,6 +18,7 @@ interface AppState {
   editorProfile: Profile | null
   editorIsNew: boolean
   cloud: CloudStatus | null
+  engine: EngineStatus | null
 
   init: () => Promise<void>
   setPage: (p: Page) => void
@@ -32,6 +33,7 @@ interface AppState {
   setProxies: (list: SavedProxy[]) => void
   setProfiles: (list: Profile[]) => void
   setCloud: (c: CloudStatus) => void
+  setEngine: (e: EngineStatus) => void
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -47,19 +49,22 @@ export const useApp = create<AppState>((set, get) => ({
   editorProfile: null,
   editorIsNew: false,
   cloud: null,
+  engine: null,
 
   init: async () => {
-    const [settings, profiles, proxies, groups, running, info, cloud] = await Promise.all([
+    const [settings, profiles, proxies, groups, running, info, cloud, engine] = await Promise.all([
       window.api.settings.get(),
       window.api.profiles.list(),
       window.api.proxies.list(),
       window.api.groups.list(),
       window.api.browser.list(),
       window.api.app.info(),
-      window.api.cloud.status()
+      window.api.cloud.status(),
+      window.api.engine.status()
     ])
     useI18n.getState().setLang(settings.language)
-    set({ settings, profiles, proxies, groups, running, info, cloud, ready: true })
+    set({ settings, profiles, proxies, groups, running, info, cloud, engine, ready: true })
+    window.api.engine.onStatus((engine) => set({ engine }))
     window.api.browser.onStatus((running) => {
       set({ running })
       get().refreshProfiles()
@@ -94,5 +99,6 @@ export const useApp = create<AppState>((set, get) => ({
   closeEditor: () => set({ editorProfile: null, editorIsNew: false }),
   setProxies: (proxies) => set({ proxies }),
   setProfiles: (profiles) => set({ profiles }),
-  setCloud: (cloud) => set({ cloud })
+  setCloud: (cloud) => set({ cloud }),
+  setEngine: (engine) => set({ engine })
 }))

@@ -9,6 +9,7 @@ import { generateFingerprint, reseed } from './fingerprint/generator'
 import { COUNTRY_LOCALES, PROFILE_COLORS } from './fingerprint/data'
 import { hostOs, launcher } from './browser/launcher'
 import { detectBrowser } from './browser/chrome-detect'
+import { engine } from './browser/engine'
 import { checkProxy, pool } from './proxy/checker'
 import { parseProxyLine, parseProxyList } from './proxy/parse'
 import { cloud, CloudError } from './cloud/client'
@@ -130,7 +131,7 @@ export function registerIpc(): void {
     for (const id of ids) {
       if (launcher.isRunning(id)) await launcher.stop(id)
       const p = s.getProfile(id)
-      if (p && wipeData) launcher.deleteProfileData(p, s.settings)
+      if (p && wipeData) await launcher.deleteProfileData(p, s.settings)
     }
     s.deleteProfiles(ids)
     return s.profiles
@@ -297,6 +298,12 @@ export function registerIpc(): void {
   ipcMain.handle('proxies:checkConfig', (_e, cfg: ProxyConfig) =>
     checkProxy(cfg, { contact: s.settings.getipintelContact, abuseKey: s.settings.abuseIpDbKey, speedTest: true, speedTestBytes: s.settings.speedTestBytes })
   )
+
+  // ---- engine -----------------------------------------------------------
+  engine.on('status', (st) => send('engine:status', st))
+  ipcMain.handle('engine:status', () => engine.status())
+  ipcMain.handle('engine:install', () => engine.install())
+  ipcMain.handle('engine:remove', () => { engine.remove(); return engine.status() })
 
   // ---- cloud account ----------------------------------------------------
   const wrap = async <T>(fn: () => Promise<T>): Promise<T> => {

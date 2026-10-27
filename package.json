@@ -1,6 +1,6 @@
 {
   "name": "facetbrowser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "FacetBrowser - anti-detect multi-profile browser with proxy quality analysis",
   "homepage": "https://facetbrowser.com",
   "main": "./out/main/index.js",
@@ -51,7 +51,7 @@
   "build": {
     "appId": "com.facetbrowser.app",
     "productName": "FacetBrowser",
-    "copyright": "Copyright \u00a9 2026 facetbrowser.com",
+    "copyright": "Copyright © 2026 facetbrowser.com",
     "directories": {
       "output": "release",
       "buildResources": "build"
