@@ -63,7 +63,7 @@ jobs:
           generate_release_notes: true
 
       - name: Upload to facetbrowser.com
-        if: ${{ env.FACET_ADMIN_TOKEN != '' }}
+        if: ${{ secrets.FACET_ADMIN_TOKEN != '' }}
         shell: bash
         env:
           FACET_ADMIN_TOKEN: ${{ secrets.FACET_ADMIN_TOKEN }}
