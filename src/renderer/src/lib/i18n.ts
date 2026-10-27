@@ -283,7 +283,7 @@ const dict = {
 
   // settings
   'settings.title': ['Ayarlar', 'Settings'],
-  'settings.browser': ['Tarayıcı motoru', 'Browser engine'],
+  'settings.browser': ['Kurulu tarayıcı', 'Installed browser'],
   'settings.browserHint': ['Profiller bu Chromium tabanlı tarayıcıyla açılır. Her profil kendi veri klasörünü kullanır.', 'Profiles open with this Chromium-based browser. Each profile uses its own data folder.'],
   'settings.channel': ['Kanal', 'Channel'],
   'settings.channel.chrome': ['Google Chrome', 'Google Chrome'],
