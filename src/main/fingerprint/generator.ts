@@ -63,7 +63,6 @@ export function generateFingerprint(opts: GenerateFingerprintOptions = {}): Fing
   const [vendor, renderer] = pick(rnd, gpus)
   const [width, height, pixelRatio] = pick(rnd, screens)
   const loc = pick(rnd, LOCALES)
-  const memory = os === 'android' ? pick(rnd, [4, 6, 8]) : os === 'macos' ? pick(rnd, [8, 8, 16, 16, 32]) : pick(rnd, MEMORY_CHOICES)
 
   return {
     seed,
@@ -75,10 +74,11 @@ export function generateFingerprint(opts: GenerateFingerprintOptions = {}): Fing
     languages: loc.languages,
     locale: loc.locale,
     timezone: 'auto',
+    localeMode: 'auto',
     geolocation: { mode: 'auto' },
     screen: { width, height, colorDepth: 24, pixelRatio },
     hardwareConcurrency: pick(rnd, cores),
-    deviceMemory: Math.min(memory, 8),
+    deviceMemory: engineDeviceMemory(seed),
     maxTouchPoints: os === 'android' ? 5 : 0,
     webgl: { vendor, renderer, mode: 'noise' },
     canvas: 'noise',
@@ -99,5 +99,12 @@ export function generateFingerprint(opts: GenerateFingerprintOptions = {}): Fing
 
 // Re-roll only the noise seed but keep the human-visible identity.
 export function reseed(fp: Fingerprint): Fingerprint {
-  return { ...fp, seed: Math.floor(Math.random() * 0xffffffff) }
+  const seed = Math.floor(Math.random() * 0xffffffff)
+  return { ...fp, seed, deviceMemory: engineDeviceMemory(seed) }
+}
+
+// The engine derives navigator.deviceMemory from the seed (8, 16 or 32 GB)
+// in every context; mirror its formula so the editor shows what pages see.
+export function engineDeviceMemory(seed: number): number {
+  return [8, 16, 32][(seed % 2147483647) % 3]
 }

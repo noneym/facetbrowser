@@ -329,23 +329,22 @@ function FingerprintTab({ fp, patchFp, setFp }: { fp: Fingerprint; patchFp: (p: 
           <Field label={t('fp.cores')}>
             <Select value={fp.hardwareConcurrency} onChange={(e) => patchFp({ hardwareConcurrency: Number(e.target.value) })}>{[2, 4, 6, 8, 10, 12, 16, 24, 32].map((n) => <option key={n} value={n}>{n}</option>)}</Select>
           </Field>
-          <Field label={t('fp.memory')}>
-            <Select value={fp.deviceMemory} onChange={(e) => patchFp({ deviceMemory: Number(e.target.value) })}>{[0.25, 0.5, 1, 2, 4, 8].map((n) => <option key={n} value={n}>{n}</option>)}</Select>
+          <Field label={t('fp.memory')} hint={t('fp.memoryHint')}>
+            <Input value={String(fp.deviceMemory)} readOnly className="font-mono" />
           </Field>
-          <Field label={t('fp.mic')}><Input type="number" min={0} value={fp.mediaDevices.audioInputs} onChange={(e) => patchFp({ mediaDevices: { ...fp.mediaDevices, audioInputs: Number(e.target.value) || 0 } })} className="font-mono" /></Field>
-          <Field label={t('fp.camera')}><Input type="number" min={0} value={fp.mediaDevices.videoInputs} onChange={(e) => patchFp({ mediaDevices: { ...fp.mediaDevices, videoInputs: Number(e.target.value) || 0 } })} className="font-mono" /></Field>
         </div>
       </Group>
 
       <Group title={t('fp.section.locale')}>
         <div className="grid grid-cols-2 gap-3">
+          <Toggle checked={fp.localeMode !== 'manual'} onChange={(v) => patchFp({ localeMode: v ? 'auto' : 'manual' })} label={t('fp.localeAuto')} hint={t('fp.localeAutoHint')} />
           <Field label={t('fp.locale')}>
-            <Select value={fp.locale} onChange={(e) => { const l = e.target.value; patchFp({ locale: l, languages: [l, l.split('-')[0], ...(l.startsWith('en') ? [] : ['en'])] }) }}>
+            <Select value={fp.locale} disabled={fp.localeMode !== 'manual'} onChange={(e) => { const l = e.target.value; patchFp({ locale: l, languages: [l, l.split('-')[0], ...(l.startsWith('en') ? [] : ['en'])] }) }}>
               {[...new Set([fp.locale, ...LOCALE_OPTIONS])].map((l) => <option key={l} value={l}>{l}</option>)}
             </Select>
           </Field>
           <Field label={t('fp.languages')}>
-            <Input value={fp.languages.join(', ')} onChange={(e) => patchFp({ languages: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} className="font-mono text-[12.5px]" />
+            <Input value={fp.languages.join(', ')} disabled={fp.localeMode !== 'manual'} onChange={(e) => patchFp({ languages: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} className="font-mono text-[12.5px]" />
           </Field>
           <Field label={t('fp.timezone')} hint={t('fp.timezoneHint')}>
             <Select value={fp.timezone} onChange={(e) => patchFp({ timezone: e.target.value })}>
@@ -388,7 +387,6 @@ function FingerprintTab({ fp, patchFp, setFp }: { fp: Fingerprint; patchFp: (p: 
           </Row>
         </div>
         <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-          <Toggle checked={fp.batteryMask} onChange={(v) => patchFp({ batteryMask: v })} label={t('fp.battery')} />
           <Toggle checked={fp.doNotTrack === true} onChange={(v) => patchFp({ doNotTrack: v ? true : null })} label={t('fp.dnt')} />
         </div>
         <Field label={t('fp.seed')} hint={t('fp.seedHint')} className="mt-2 w-64">

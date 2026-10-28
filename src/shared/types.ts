@@ -74,6 +74,7 @@ export interface Fingerprint {
   vendor: string
   languages: string[]
   locale: string
+  localeMode?: 'auto' | 'manual' // auto (default): locale and languages follow the proxy country at launch
   timezone: string | 'auto'
   geolocation: { mode: 'auto' | 'custom' | 'off' | 'prompt'; lat?: number; lon?: number; accuracy?: number }
   screen: { width: number; height: number; colorDepth: number; pixelRatio: number }

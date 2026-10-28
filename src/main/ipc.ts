@@ -9,7 +9,7 @@ import { generateFingerprint, reseed } from './fingerprint/generator'
 import { COUNTRY_LOCALES, PROFILE_COLORS } from './fingerprint/data'
 import { launcher } from './browser/launcher'
 import { engine } from './browser/engine'
-import { checkProxy, pool } from './proxy/checker'
+import { checkProxy, pool, quickGeo } from './proxy/checker'
 import { parseProxyLine, parseProxyList } from './proxy/parse'
 import { cloud, CloudError } from './cloud/client'
 import { sync } from './cloud/sync'
@@ -24,6 +24,37 @@ function win(): BrowserWindow | null {
 }
 function send(channel: string, payload: unknown): void {
   win()?.webContents.send(channel, payload)
+}
+
+// Timezone, language and location follow the proxy's exit country. A proxy
+// that was never checked (or whose result is a day old) gets a one-request
+// geo lookup at launch; the result is kept on the saved proxy.
+const GEO_MAX_AGE_MS = 24 * 3600000
+async function freshProxyInfo(profile: Profile, config: ProxyConfig | null, known?: ProxyCheckResult): Promise<ProxyCheckResult | undefined> {
+  if (!config) return undefined
+  const usable = known && known.timezone && known.countryCode && Date.now() - known.checkedAt < GEO_MAX_AGE_MS
+  if (usable) return known
+  const geo = await quickGeo(config)
+  if (!geo) return known
+  const merged: ProxyCheckResult = { ...(known || {}), ...geo, checkedAt: known?.checkedAt && Date.now() - known.checkedAt < GEO_MAX_AGE_MS ? known.checkedAt : geo.checkedAt }
+  if (profile.proxy.mode === 'saved' && profile.proxy.savedId) {
+    const saved = store().getProxy(profile.proxy.savedId)
+    if (saved) store().upsertProxy({ ...saved, lastCheck: merged })
+  }
+  return merged
+}
+
+// localeMode 'auto' (the default): locale and languages are set from the
+// proxy country before launch and persisted so the editor shows them.
+function applyProxyLocale(profile: Profile, info?: ProxyCheckResult): void {
+  const fp = profile.fingerprint
+  if (fp.localeMode === 'manual' || !info?.countryCode) return
+  // Unknown country: English is a safer default than the host's own locale.
+  const loc = COUNTRY_LOCALES[info.countryCode] || COUNTRY_LOCALES['US']
+  if (fp.locale === loc.locale && JSON.stringify(fp.languages) === JSON.stringify(loc.languages)) return
+  fp.locale = loc.locale
+  fp.languages = loc.languages
+  store().upsertProfile(profile, { keepUpdatedAt: true })
 }
 
 function resolveProxy(profile: Profile): { config: ProxyConfig | null; info?: ProxyCheckResult } {
@@ -235,7 +266,9 @@ export function registerIpc(): void {
     if (!gate.ok) throw new Error(gate.reason)
     await sync.pullCookiesIfNewer(id).catch(() => {})
     extensions.applyShares(p)
-    const { config, info } = resolveProxy(p)
+    const { config, info: known } = resolveProxy(p)
+    const info = await freshProxyInfo(p, config, known)
+    applyProxyLocale(p, info)
     await launcher.launch({ profile: p, proxy: config, proxyInfo: info, settings: s.settings, extensionDirs: extensions.dirsFor(p) })
     p.launchCount = (p.launchCount || 0) + 1
     p.lastLaunchedAt = Date.now()

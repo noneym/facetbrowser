@@ -224,6 +224,39 @@ export function scoreResult(r: ProxyCheckResult): ProxyCheckResult {
   return { ...r, quality: q, grade, verdict, issues }
 }
 
+// Fast exit-IP geo lookup through the proxy (one request, no scoring); used
+// at launch so timezone, language and location can follow the proxy even
+// when it has never been fully checked.
+export async function quickGeo(proxy: ProxyConfig): Promise<ProxyCheckResult | null> {
+  try {
+    const fields = 'status,query,country,countryCode,regionName,city,isp,org,as,timezone,lat,lon,proxy,hosting,mobile'
+    const res = await httpGet(`http://ip-api.com/json/?fields=${fields}`, { agent: agentFor(proxy), timeoutMs: 8000 })
+    if (res.status !== 200) return null
+    const d = JSON.parse(res.body) as IpApi & { query?: string }
+    if (d.status !== 'success' || !d.query) return null
+    return {
+      checkedAt: Date.now(),
+      ok: true,
+      ip: d.query,
+      country: d.country,
+      countryCode: d.countryCode,
+      region: d.regionName,
+      city: d.city,
+      isp: d.isp,
+      org: d.org,
+      asn: d.as,
+      timezone: d.timezone || '',
+      lat: d.lat,
+      lon: d.lon,
+      isProxy: !!d.proxy,
+      isHosting: !!d.hosting,
+      isMobile: !!d.mobile
+    } as ProxyCheckResult
+  } catch {
+    return null
+  }
+}
+
 export async function checkProxy(proxy: ProxyConfig, opts: CheckOptions = {}): Promise<ProxyCheckResult> {
   const base: ProxyCheckResult = { checkedAt: Date.now(), ok: false }
   opts.onStage?.('connecting')

@@ -3,7 +3,6 @@ import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
 import type { CookieRecord, Profile, ProxyConfig, ProxyCheckResult, RunningProfile, SessionJar, Settings, StorageOrigin } from '@shared/types'
-import { buildFingerprintScript } from './fingerprint-script'
 import { startBridge, type Bridge } from '../proxy/bridge'
 import { engine } from './engine'
 
@@ -49,7 +48,7 @@ export interface LaunchInput {
 // start, which logged the user out of every site. The crash bubble is hidden
 // with --hide-crash-restore-bubble and tabs are not restored, so the only
 // visible effect is that logins survive.
-function writeProfilePrefs(userDataDir: string, languages: string[], pinExtensions: string[] = []): void {
+function writeProfilePrefs(userDataDir: string, languages: string[], pinExtensions: string[] = [], opts: { doNotTrack?: boolean | null; geolocation?: 'block' | 'ask' } = {}): void {
   const dir = path.join(userDataDir, 'Default')
   const file = path.join(dir, 'Preferences')
   fs.mkdirSync(dir, { recursive: true })
@@ -70,6 +69,16 @@ function writeProfilePrefs(userDataDir: string, languages: string[], pinExtensio
   const bar = (prefs.bookmark_bar as Record<string, unknown>) || {}
   if (bar.show_on_all_tabs === undefined) bar.show_on_all_tabs = false
   prefs.bookmark_bar = bar
+  // Do Not Track and geolocation are real Chromium settings, so nothing has
+  // to be faked in page JavaScript.
+  if (opts.doNotTrack !== undefined) prefs.enable_do_not_track = !!opts.doNotTrack
+  if (opts.geolocation) {
+    const profile2 = (prefs.profile as Record<string, unknown>) || {}
+    const dcs = (profile2.default_content_setting_values as Record<string, unknown>) || {}
+    dcs.geolocation = opts.geolocation === 'block' ? 2 : 0
+    profile2.default_content_setting_values = dcs
+    prefs.profile = profile2
+  }
   // Web Store extensions go on the toolbar in every profile; Chromium would
   // otherwise hide a freshly loaded extension behind the puzzle-piece menu.
   if (pinExtensions.length) {
@@ -166,7 +175,7 @@ class Launcher extends EventEmitter {
       }
 
       const pinIds = (input.extensionDirs || []).map((d) => path.basename(d)).filter((id) => /^[a-p]{32}$/.test(id))
-      writeProfilePrefs(dir, fp.languages.length ? fp.languages : [fp.locale], pinIds)
+      writeProfilePrefs(dir, fp.languages.length ? fp.languages : [fp.locale], pinIds, { doNotTrack: fp.doNotTrack, geolocation: fp.geolocation.mode === 'off' ? 'block' : 'ask' })
 
       // Playwright's default switch list is bypassed; only the debugging pipe
       // and the engine flags are passed, so nothing looks automated.
@@ -185,7 +194,11 @@ class Launcher extends EventEmitter {
         args.push(`--proxy-server=http://127.0.0.1:${bridge.port}`)
         args.push('--proxy-bypass-list=<-loopback>')
       }
-      if (fp.webrtc === 'real') args.push('--force-webrtc-ip-handling-policy=default')
+      // WebRTC is handled by Chromium's own IP-handling policy, not by patching
+      // RTCPeerConnection. Behind a proxy UDP would bypass it and leak the real
+      // address, so anything but 'real' disables non-proxied UDP there.
+      const rtcPolicy = fp.webrtc === 'real' ? 'default' : bridge || fp.webrtc === 'disabled' ? 'disable_non_proxied_udp' : 'default_public_interface_only'
+      args.push(`--force-webrtc-ip-handling-policy=${rtcPolicy}`)
       const extensions = [...new Set([...profile.extensions, ...(input.extensionDirs || [])])].filter((e) => e && fs.existsSync(e))
       if (extensions.length) {
         args.push(`--disable-extensions-except=${extensions.join(',')}`)
@@ -207,8 +220,6 @@ class Launcher extends EventEmitter {
         bypassCSP: false,
         serviceWorkers: 'allow'
       })
-
-      await context.addInitScript(buildFingerprintScript(fp, { publicIp: proxyInfo?.ip }))
 
       const entry: Running = { context, bridge, startedAt: Date.now(), state: 'running', origins: new Set(), tabs: new Map(), tabSnapshot: [], tabTimer: null }
       this.running.set(profile.id, entry)
