@@ -24,9 +24,9 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 - WebRTC: altered (hides real IP, keeps proxy IP), disabled or real
 - Timezone and geolocation taken from the proxy automatically, or set by hand
 - Font list masked per operating system, media device counts, battery masking, Do Not Track
-- UA version is synced to the installed Chrome at launch, so client hints never contradict the UA string
+- UA version matches the installed FacetBrowser Engine build, so client hints never contradict the UA string
 - `navigator.webdriver` false, no automation banner, native-looking overrides (`toString` returns `[native code]`)
-- Launch flags are kept to the bare minimum (no `--no-sandbox`, none of Playwright's `--disable-features` list; `--test-type` keeps Chrome from showing the command-line warning bar). When the profile OS equals the host OS, Chrome sends its own user agent and client hints untouched; language comes from the profile preferences. Cross-OS profiles use a CDP user agent override and are less stealthy.
+- Launch flags are kept to the bare minimum (no `--no-sandbox`, none of Playwright's `--disable-features` list). The engine applies the user agent, client hints and platform itself from `--fingerprint-platform`, so cross-OS profiles need no CDP override.
 
 **Account and cloud sync** (backed by [FacetBrowser-web](https://github.com/noneym/FacetBrowser-web))
 - Sign in or register inside the app; 14-day trial, lifetime Starter (15 profiles) and Unlimited licenses
@@ -53,7 +53,7 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 
 ## Development
 
-Requirements: Node 20+, Google Chrome or Microsoft Edge installed (or any Chromium build via Settings > Custom path).
+Requirements: Node 20+. The app downloads the FacetBrowser Engine on first run (Windows x64).
 
 ```bash
 npm install
@@ -75,7 +75,8 @@ npm run typecheck
 
 ## How it works
 
-- `src/main/browser/launcher.ts` starts a Chromium persistent context per profile via `playwright-core` and injects `src/main/browser/fingerprint-script.ts` into every frame before page scripts run.
+- `src/main/browser/launcher.ts` starts a FacetBrowser Engine persistent context per profile via `playwright-core`; `src/main/browser/engine.ts` downloads and verifies the engine build. `src/main/browser/fingerprint-script.ts` only covers what the engine does not (memory cap, battery, media devices, WebRTC policy).
+- Startup diagnostics are written to `%APPDATA%/FacetBrowser/logs/main.log`.
 - `src/main/proxy/bridge.ts` is the local forwarding proxy that Chromium talks to; it performs HTTP CONNECT or SOCKS handshakes with the real upstream.
 - `src/main/proxy/checker.ts` runs the quality pipeline. getipintel calls are rate limited (one every 4.5 s) across the whole app.
 - Data lives in `%APPDATA%/FacetBrowser/facetbrowser.json`; profile browser data in `%APPDATA%/FacetBrowser/profiles/<id>`.
