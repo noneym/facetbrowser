@@ -8,3 +8,5 @@ release/
 .env.local
 .vscode/
 .idea/
+release-ci/
+*.tsbuildinfo
