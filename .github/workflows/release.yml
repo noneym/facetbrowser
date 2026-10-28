@@ -62,13 +62,14 @@ jobs:
           files: |
             release/FacetBrowser-Setup-*.exe
             release/FacetBrowser-*-portable.exe
+            release/latest.yml
           generate_release_notes: true
 
       - name: Upload to facetbrowser.com
         if: ${{ env.FACET_ADMIN_TOKEN != '' }}
         shell: bash
         run: |
-          for f in release/FacetBrowser-Setup-*.exe release/FacetBrowser-*-portable.exe; do
+          for f in release/FacetBrowser-Setup-*.exe release/FacetBrowser-*-portable.exe release/latest.yml; do
             name=$(basename "$f")
             echo "uploading $name"
             curl --fail -sS -T "$f" -H "x-admin-token: $FACET_ADMIN_TOKEN" "https://facetbrowser.com/api/admin/releases/$name"

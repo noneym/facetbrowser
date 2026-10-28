@@ -1,5 +1,7 @@
 import { create } from 'zustand'
-import type { AppInfo, EngineStatus, Group, Profile, ProxyCheckResult, RunningProfile, SavedProxy, Settings } from '@shared/types'
+import { toast } from './toast'
+import { t } from '@/lib/i18n'
+import type { AppInfo, EngineStatus, Group, Profile, ProxyCheckResult, RunningProfile, SavedProxy, Settings, UpdateStatus } from '@shared/types'
 import type { CloudStatus } from '@shared/cloud'
 import { useI18n } from '@/lib/i18n'
 
@@ -19,6 +21,7 @@ interface AppState {
   editorIsNew: boolean
   cloud: CloudStatus | null
   engine: EngineStatus | null
+  update: UpdateStatus | null
 
   init: () => Promise<void>
   setPage: (p: Page) => void
@@ -34,6 +37,7 @@ interface AppState {
   setProfiles: (list: Profile[]) => void
   setCloud: (c: CloudStatus) => void
   setEngine: (e: EngineStatus) => void
+  setUpdate: (u: UpdateStatus) => void
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -50,6 +54,7 @@ export const useApp = create<AppState>((set, get) => ({
   editorIsNew: false,
   cloud: null,
   engine: null,
+  update: null,
 
   init: async () => {
     const [settings, profiles, proxies, groups, running, info, cloud, engine] = await Promise.all([
@@ -65,6 +70,12 @@ export const useApp = create<AppState>((set, get) => ({
     useI18n.getState().setLang(settings.language)
     set({ settings, profiles, proxies, groups, running, info, cloud, engine, ready: true })
     window.api.engine.onStatus((engine) => { set({ engine }); get().refreshInfo() })
+    window.api.update.status().then((update) => set({ update })).catch(() => {})
+    window.api.update.onStatus((update) => {
+      const was = get().update?.state
+      set({ update })
+      if (update.state === 'ready' && was !== 'ready') toast.info(t('update.readyToast', { v: update.version || '' }))
+    })
     window.api.browser.onStatus((running) => {
       set({ running })
       get().refreshProfiles()
@@ -99,5 +110,6 @@ export const useApp = create<AppState>((set, get) => ({
   setProxies: (proxies) => set({ proxies }),
   setProfiles: (profiles) => set({ profiles }),
   setCloud: (cloud) => set({ cloud }),
-  setEngine: (engine) => set({ engine })
+  setEngine: (engine) => set({ engine }),
+  setUpdate: (update) => set({ update })
 }))

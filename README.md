@@ -11,7 +11,7 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 - Clone a profile 1-50 times, with a fresh fingerprint per copy or the same device identity
 - Tags, groups, favourites, notes, search and bulk actions (launch, stop, export, delete)
 - Import / export profiles as JSON, import / export cookies (Playwright JSON, EditThisCookie, Netscape cookies.txt)
-- Start pages and unpacked extensions per profile
+- Start pages and unpacked extensions per profile; the tabs open when a profile was closed are reopened on the next launch (Settings > General to turn off)
 
 **FacetBrowser Engine** (Windows x64)
 - The only browser the app uses: a Chromium build based on [fingerprint-chromium](https://github.com/adryfish/fingerprint-chromium) (BSD-3-Clause) that spoofs canvas, WebGL, audio, fonts, GPU, cores and the user agent at the C++ level and reports `navigator.webdriver` as false, so no JavaScript injection is needed
@@ -50,6 +50,9 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 - Fraud signals: getipintel residential proxy probability (`oflags=r`) and AbuseIPDB confidence, reports and Tor flag
 - Unified 0-100 quality score with grade A-F and a plain-language list of issues
 - Bulk checker page with CSV export and "add usable proxies to library"
+
+**Updates**
+- The installer build checks facetbrowser.com for new versions, downloads them in the background and installs on restart (Settings > About). The portable build links to the download page instead.
 
 ## Development
 

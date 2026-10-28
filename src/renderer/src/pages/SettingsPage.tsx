@@ -4,7 +4,7 @@ import type { Settings } from '@shared/types'
 import { useApp } from '@/store/app'
 import { useT } from '@/lib/i18n'
 import { toast } from '@/store/toast'
-import { Button, Field, Input, Select, Modal } from '@/components/ui'
+import { Button, Field, Input, Select, Modal, Toggle } from '@/components/ui'
 import type { Key } from '@/lib/i18n'
 import { timeAgo } from '@/lib/format'
 
@@ -56,6 +56,7 @@ export function SettingsPage(): JSX.Element {
           <Field label={t('settings.defaultStartUrl')}>
             <Input value={draft.defaultStartUrl} onChange={(e) => set('defaultStartUrl', e.target.value)} placeholder="https://" />
           </Field>
+          <Toggle checked={draft.restoreTabs !== false} onChange={(v) => set('restoreTabs', v)} label={t('settings.restoreTabs')} hint={t('settings.restoreTabsHint')} />
           <div className="grid grid-cols-2 gap-4">
             <Field label={t('settings.language')}>
               <Select value={draft.language} onChange={(e) => set('language', e.target.value as Settings['language'])}>
@@ -91,8 +92,57 @@ export function SettingsPage(): JSX.Element {
             <dt className="text-fg-muted">Web</dt>
             <dd><button className="hover:underline" onClick={() => window.api.app.openExternal('https://facetbrowser.com')}>facetbrowser.com</button></dd>
           </dl>
+          <UpdateSection />
         </Section>
       </div>
+    </div>
+  )
+}
+
+function UpdateSection(): JSX.Element {
+  const t = useT()
+  const update = useApp((s) => s.update)
+  const setUpdate = useApp((s) => s.setUpdate)
+  const [busy, setBusy] = useState(false)
+  const st = update?.state || 'idle'
+  const run = async (fn: () => Promise<unknown>): Promise<void> => {
+    setBusy(true)
+    try {
+      const r = await fn()
+      if (r && typeof r === 'object' && 'state' in r) setUpdate(r as NonNullable<typeof update>)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const label =
+    st === 'checking' ? t('update.checking')
+    : st === 'none' ? t('update.none')
+    : st === 'available' ? t('update.available', { v: update?.version || '' })
+    : st === 'downloading' ? t('update.downloading', { p: String(update?.progress ?? 0) })
+    : st === 'ready' ? t('update.ready', { v: update?.version || '' })
+    : st === 'error' ? t('update.error', { e: update?.error || '' })
+    : st === 'unsupported' ? t('update.unsupported')
+    : t('update.idle')
+  return (
+    <div className="mt-4 flex flex-col gap-2 border-t border-line pt-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[12.5px] font-medium">{t('update.title')}</span>
+          <span className={'text-[12px] ' + (st === 'error' ? 'text-danger' : st === 'ready' || st === 'available' ? 'text-accent' : 'text-fg-muted')}>{label}</span>
+        </div>
+        {st === 'unsupported' ? (
+          <Button onClick={() => window.api.app.openExternal('https://facetbrowser.com/download')}>{t('update.downloadPage')}</Button>
+        ) : st === 'ready' ? (
+          <Button variant="primary" onClick={() => window.api.update.install()}>{t('update.install')}</Button>
+        ) : st === 'available' ? (
+          <Button variant="primary" loading={busy} onClick={() => run(() => window.api.update.download())}>{t('update.download')}</Button>
+        ) : (
+          <Button loading={busy || st === 'checking'} disabled={st === 'downloading'} onClick={() => run(() => window.api.update.check())}>{t('update.check')}</Button>
+        )}
+      </div>
+      {st === 'downloading' && (
+        <div className="h-1 w-full overflow-hidden rounded-full bg-line"><div className="h-full bg-accent transition-[width]" style={{ width: `${update?.progress || 0}%` }} /></div>
+      )}
     </div>
   )
 }

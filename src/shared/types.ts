@@ -109,6 +109,7 @@ export interface Profile {
   proxy: ProfileProxy
   fingerprint: Fingerprint
   startUrls: string[]
+  lastTabs?: string[] // tabs open when the profile was last closed; reopened on launch
   extensions: string[]
   createdAt: number
   updatedAt: number
@@ -127,6 +128,7 @@ export interface Group {
 export interface Settings {
   profilesDir: string
   defaultStartUrl: string
+  restoreTabs: boolean // reopen last session's tabs instead of the start page
   getipintelContact: string
   abuseIpDbKey: string
   proxyCheckConcurrency: number
@@ -183,6 +185,14 @@ export interface EngineStatus {
   downloading: boolean
   progress: number
   error: string | null
+}
+
+export interface UpdateStatus {
+  state: 'idle' | 'checking' | 'none' | 'available' | 'downloading' | 'ready' | 'error' | 'unsupported'
+  version?: string
+  progress?: number
+  error?: string
+  checkedAt?: number
 }
 
 export interface AppInfo {

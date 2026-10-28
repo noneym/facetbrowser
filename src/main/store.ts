@@ -39,6 +39,7 @@ export function defaultSettings(): Settings {
   return {
     profilesDir: path.join(app.getPath('userData'), 'profiles'),
     defaultStartUrl: 'https://facetbrowser.com/check',
+    restoreTabs: true,
     getipintelContact: '',
     abuseIpDbKey: '',
     proxyCheckConcurrency: 5,

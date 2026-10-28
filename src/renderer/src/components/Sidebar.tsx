@@ -1,4 +1,4 @@
-import { UserCircle, Globe, Pulse, GearSix, Warning } from '@phosphor-icons/react'
+import { ArrowCircleUp, UserCircle, Globe, Pulse, GearSix, Warning } from '@phosphor-icons/react'
 import { useApp, type Page } from '@/store/app'
 import { useT } from '@/lib/i18n'
 import { cx } from './ui'
@@ -13,6 +13,7 @@ export function Sidebar(): JSX.Element {
   const info = useApp((s) => s.info)
   const profiles = useApp((s) => s.profiles)
   const proxies = useApp((s) => s.proxies)
+  const update = useApp((s) => s.update)
 
   const items: Array<{ id: Page; label: string; icon: JSX.Element; count?: number }> = [
     { id: 'profiles', label: t('nav.profiles'), icon: <UserCircle size={18} />, count: profiles.length },
@@ -48,6 +49,12 @@ export function Sidebar(): JSX.Element {
       </nav>
 
       <div className="mt-auto flex flex-col gap-2 border-t border-line p-3 text-[12px]">
+        {update?.state === 'ready' && (
+          <button onClick={() => window.api.update.install()} className="focus-ring flex items-center gap-2 rounded-[var(--radius-md)] bg-accent/10 px-2.5 py-2 text-left text-accent hover:bg-accent/15">
+            <ArrowCircleUp size={16} weight="bold" className="shrink-0" />
+            <span className="truncate">{t('update.banner', { v: update.version || '' })}</span>
+          </button>
+        )}
         <AccountBadge />
         {running.length > 0 && (
           <div className="flex items-center gap-2 text-fg-muted">

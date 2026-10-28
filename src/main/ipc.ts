@@ -14,6 +14,7 @@ import { parseProxyLine, parseProxyList } from './proxy/parse'
 import { cloud, CloudError } from './cloud/client'
 import { sync } from './cloud/sync'
 import { providers, providerMeta } from './providers'
+import { updater } from './updater'
 import type { ProviderAccount, ProviderGenerateOptions } from '@shared/cloud'
 
 function win(): BrowserWindow | null {
@@ -120,7 +121,10 @@ export function registerIpc(): void {
   ipcMain.handle('profiles:list', () => s.profiles)
   ipcMain.handle('profiles:new', (_e, partial?: Partial<Profile>) => newProfile(partial))
   ipcMain.handle('profiles:save', (_e, p: Profile) => {
-    if (!s.getProfile(p.id)) assertProfileCapacity(1)
+    const prev = s.getProfile(p.id)
+    if (!prev) assertProfileCapacity(1)
+    // The editor works on a copy; keep main-process-only fields it never sees.
+    if (prev && p.lastTabs === undefined) p.lastTabs = prev.lastTabs
     return s.upsertProfile(p)
   })
   ipcMain.handle('profiles:delete', async (_e, ids: string[], wipeData: boolean) => {
@@ -211,6 +215,15 @@ export function registerIpc(): void {
 
   // ---- browser ----------------------------------------------------------
   launcher.on('status', (list) => send('browser:status', list))
+  // Remember the tabs a profile had when it closed, so the next launch reopens them.
+  launcher.on('closed', (id: string, tabs?: string[]) => {
+    if (!Array.isArray(tabs)) return
+    const p = s.getProfile(id)
+    if (!p || JSON.stringify(p.lastTabs || []) === JSON.stringify(tabs)) return
+    p.lastTabs = tabs
+    s.upsertProfile(p)
+    send('cloud:data', null)
+  })
   ipcMain.handle('browser:list', () => launcher.list())
   ipcMain.handle('browser:launch', async (_e, id: string) => {
     const p = s.getProfile(id)
@@ -226,6 +239,13 @@ export function registerIpc(): void {
     return p
   })
   ipcMain.handle('browser:stop', (_e, id: string) => launcher.stop(id))
+
+  // ---- updates ---------------------------------------------------------
+  updater.on('status', (st) => send('update:status', st))
+  ipcMain.handle('update:status', () => updater.status())
+  ipcMain.handle('update:check', () => updater.check())
+  ipcMain.handle('update:download', () => updater.download())
+  ipcMain.handle('update:install', () => updater.install())
   ipcMain.handle('browser:stopAll', () => launcher.stopAll())
 
   // ---- cookies ----------------------------------------------------------

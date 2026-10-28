@@ -5,6 +5,7 @@ import { registerIpc } from './ipc'
 import { launcher } from './browser/launcher'
 import { store } from './store'
 import { sync } from './cloud/sync'
+import { updater } from './updater'
 
 // Fixed data location regardless of how the app is started (packaged, `electron .`, or test harness).
 app.setPath('userData', process.env['FACETBROWSER_DATA_DIR'] || path.join(app.getPath('appData'), 'FacetBrowser'))
@@ -83,6 +84,7 @@ if (!gotLock) {
     registerIpc()
     createWindow()
     if (store().cloud.session) sync.start()
+    updater.start(log)
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })

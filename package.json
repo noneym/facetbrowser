@@ -1,6 +1,6 @@
 {
   "name": "facetbrowser",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "FacetBrowser - anti-detect multi-profile browser with proxy quality analysis",
   "homepage": "https://facetbrowser.com",
   "main": "./out/main/index.js",
@@ -26,6 +26,7 @@
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@phosphor-icons/react": "^2.1.10",
+    "electron-updater": "^6.8.11",
     "https-proxy-agent": "^7.0.6",
     "motion": "^12.0.0",
     "playwright-core": "^1.64.0",
@@ -90,6 +91,12 @@
     },
     "portable": {
       "artifactName": "${productName}-${version}-portable.${ext}"
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://facetbrowser.com/dl"
+      }
+    ]
   }
 }

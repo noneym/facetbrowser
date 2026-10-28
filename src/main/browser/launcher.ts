@@ -13,7 +13,12 @@ interface Running {
   startedAt: number
   state: RunningProfile['state']
   origins: Set<string> // http(s) origins navigated to in this run
+  tabs: Map<Page, string> // current URL per open tab
+  tabSnapshot: string[] // last known tab list, kept across the shutdown burst of page closes
+  tabTimer: NodeJS.Timeout | null
 }
+
+const MAX_TABS = 50
 
 // Limits for the localStorage part of the account jar (server cap is 8 MB).
 const STORAGE_ITEM_MAX = 256 * 1024
@@ -112,6 +117,10 @@ class Launcher extends EventEmitter {
     return [...(this.running.get(id)?.origins || [])]
   }
 
+  tabsOf(id: string): string[] {
+    return [...(this.running.get(id)?.tabSnapshot || [])]
+  }
+
   private emitStatus(): void {
     this.emit('status', this.list())
   }
@@ -133,7 +142,7 @@ class Launcher extends EventEmitter {
     let bridge: Bridge | null = null
     if (proxy) bridge = await startBridge(proxy)
 
-    const placeholder: Running = { context: null as unknown as BrowserContext, bridge, startedAt: Date.now(), state: 'starting', origins: new Set() }
+    const placeholder: Running = { context: null as unknown as BrowserContext, bridge, startedAt: Date.now(), state: 'starting', origins: new Set(), tabs: new Map(), tabSnapshot: [], tabTimer: null }
     this.running.set(profile.id, placeholder)
     this.emitStatus()
 
@@ -191,14 +200,33 @@ class Launcher extends EventEmitter {
 
       await context.addInitScript(buildFingerprintScript(fp, { publicIp: proxyInfo?.ip }))
 
-      const entry: Running = { context, bridge, startedAt: Date.now(), state: 'running', origins: new Set() }
+      const entry: Running = { context, bridge, startedAt: Date.now(), state: 'running', origins: new Set(), tabs: new Map(), tabSnapshot: [], tabTimer: null }
       this.running.set(profile.id, entry)
       context.on('close', () => this.cleanup(profile.id))
+      // Tab tracking for "reopen where I left off". A tab that closes is
+      // dropped from the snapshot only after a short delay: when the browser
+      // shuts down every tab closes at once, and that burst must not wipe the
+      // list we are about to save.
+      const snapshot = (): void => {
+        entry.tabSnapshot = [...entry.tabs.values()].filter((u) => originOf(u)).slice(0, MAX_TABS)
+      }
       const track = (page: Page): void => {
+        const url = page.url()
+        if (url) entry.tabs.set(page, url)
         page.on('framenavigated', (f) => {
           if (f.parentFrame()) return
+          entry.tabs.set(page, f.url())
           const o = originOf(f.url())
           if (o) entry.origins.add(o)
+          snapshot()
+        })
+        page.on('close', () => {
+          entry.tabs.delete(page)
+          if (entry.tabTimer) clearTimeout(entry.tabTimer)
+          entry.tabTimer = setTimeout(() => {
+            entry.tabTimer = null
+            if (this.running.get(profile.id) === entry) snapshot()
+          }, 1500)
         })
       }
       context.pages().forEach(track)
@@ -206,7 +234,9 @@ class Launcher extends EventEmitter {
 
       if (!context.pages().length) await context.waitForEvent('page', { timeout: 5000 }).catch(() => null)
 
-      const urls = profile.startUrls.filter(Boolean)
+      // Where we left off beats the start page, when the setting allows it.
+      const previous = settings.restoreTabs !== false ? (profile.lastTabs || []).filter((u) => originOf(u)) : []
+      const urls = previous.length ? previous.slice(0, MAX_TABS) : profile.startUrls.filter(Boolean)
       if (!urls.length && settings.defaultStartUrl) urls.push(settings.defaultStartUrl)
       const pages = context.pages()
       for (let i = 0; i < urls.length; i++) {
@@ -226,8 +256,9 @@ class Launcher extends EventEmitter {
     const r = this.running.get(profileId)
     if (!r) return
     this.running.delete(profileId)
+    if (r.tabTimer) clearTimeout(r.tabTimer)
     await r.bridge?.close().catch(() => {})
-    this.emit('closed', profileId)
+    this.emit('closed', profileId, r.tabSnapshot)
     this.emitStatus()
   }
 
