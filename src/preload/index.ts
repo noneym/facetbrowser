@@ -72,7 +72,9 @@ const api = {
     featured: (): Promise<FeaturedExtension[]> => ipcRenderer.invoke('extensions:featured'),
     install: (input: string): Promise<InstalledExtension[]> => ipcRenderer.invoke('extensions:install', input),
     remove: (id: string): Promise<InstalledExtension[]> => ipcRenderer.invoke('extensions:remove', id),
-    setAll: (id: string, on: boolean): Promise<InstalledExtension[]> => ipcRenderer.invoke('extensions:setAll', id, on)
+    setAll: (id: string, on: boolean): Promise<InstalledExtension[]> => ipcRenderer.invoke('extensions:setAll', id, on),
+    dataProfiles: (id: string): Promise<string[]> => ipcRenderer.invoke('extensions:dataProfiles', id),
+    copyData: (id: string, from: string, to: string[]): Promise<{ copied: string[]; skippedRunning: string[]; missing: string[] }> => ipcRenderer.invoke('extensions:copyData', id, from, to)
   },
   update: {
     status: (): Promise<UpdateStatus> => ipcRenderer.invoke('update:status'),

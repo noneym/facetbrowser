@@ -49,7 +49,7 @@ export interface LaunchInput {
 // start, which logged the user out of every site. The crash bubble is hidden
 // with --hide-crash-restore-bubble and tabs are not restored, so the only
 // visible effect is that logins survive.
-function writeProfilePrefs(userDataDir: string, languages: string[]): void {
+function writeProfilePrefs(userDataDir: string, languages: string[], pinExtensions: string[] = []): void {
   const dir = path.join(userDataDir, 'Default')
   const file = path.join(dir, 'Preferences')
   fs.mkdirSync(dir, { recursive: true })
@@ -70,6 +70,14 @@ function writeProfilePrefs(userDataDir: string, languages: string[]): void {
   const bar = (prefs.bookmark_bar as Record<string, unknown>) || {}
   if (bar.show_on_all_tabs === undefined) bar.show_on_all_tabs = false
   prefs.bookmark_bar = bar
+  // Web Store extensions go on the toolbar in every profile; Chromium would
+  // otherwise hide a freshly loaded extension behind the puzzle-piece menu.
+  if (pinExtensions.length) {
+    const ext = (prefs.extensions as Record<string, unknown>) || {}
+    const pinned = Array.isArray(ext.pinned_extensions) ? (ext.pinned_extensions as string[]) : []
+    ext.pinned_extensions = [...new Set([...pinned, ...pinExtensions])]
+    prefs.extensions = ext
+  }
   fs.writeFileSync(file, JSON.stringify(prefs), 'utf8')
 }
 
@@ -157,7 +165,8 @@ class Launcher extends EventEmitter {
         geolocation = { latitude: proxyInfo.lat, longitude: proxyInfo.lon, accuracy: 1500 }
       }
 
-      writeProfilePrefs(dir, fp.languages.length ? fp.languages : [fp.locale])
+      const pinIds = (input.extensionDirs || []).map((d) => path.basename(d)).filter((id) => /^[a-p]{32}$/.test(id))
+      writeProfilePrefs(dir, fp.languages.length ? fp.languages : [fp.locale], pinIds)
 
       // Playwright's default switch list is bypassed; only the debugging pipe
       // and the engine flags are passed, so nothing looks automated.

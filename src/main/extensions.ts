@@ -4,9 +4,10 @@ import path from 'path'
 import { execFileSync } from 'child_process'
 import { createHash } from 'crypto'
 import type { InstalledExtension, Profile } from '@shared/types'
-import { parseWebStoreId } from '@shared/extensions'
+import { parseWebStoreId, SHAREABLE_EXTENSION_IDS } from '@shared/extensions'
 import { store } from './store'
 import { engine } from './browser/engine'
+import { launcher } from './browser/launcher'
 
 // Chrome Web Store extensions for profiles. The CRX is fetched from Google's
 // update service (same URL Chrome itself uses), unpacked under
@@ -94,6 +95,68 @@ class ExtensionManager {
     const dir = path.join(this.root, id)
     fs.rmSync(dir, { recursive: true, force: true })
     store().deleteExtension(id)
+  }
+
+  // Folders under <profile>/Default that hold one extension's own state:
+  // chrome.storage (local/sync/managed), IndexedDB and the newer per-extension
+  // storage partition. Copying them while both profiles are closed moves the
+  // extension's sign-in to another profile.
+  private dataDirs(profileDir: string, id: string): string[] {
+    const d = path.join(profileDir, 'Default')
+    const out = [
+      path.join(d, 'Local Extension Settings', id),
+      path.join(d, 'Sync Extension Settings', id),
+      path.join(d, 'Managed Extension Settings', id),
+      path.join(d, 'IndexedDB', `chrome-extension_${id}_0.indexeddb.leveldb`),
+      path.join(d, 'IndexedDB', `chrome-extension_${id}_0.indexeddb.blob`),
+      path.join(d, 'Storage', 'ext', id)
+    ]
+    return out
+  }
+
+  hasData(profile: Profile, id: string): boolean {
+    const dir = launcher.userDataDir(profile, store().settings)
+    return this.dataDirs(dir, id).some((p) => fs.existsSync(p))
+  }
+
+  dataProfiles(id: string): string[] {
+    return store().profiles.filter((p) => this.hasData(p, id)).map((p) => p.id)
+  }
+
+  shareable(id: string): boolean {
+    const extra = (process.env['FACETBROWSER_SHAREABLE_EXTENSIONS'] || '').split(',').filter(Boolean) // tests only
+    return SHAREABLE_EXTENSION_IDS.includes(id) || extra.includes(id)
+  }
+
+  copyData(id: string, fromProfileId: string, toProfileIds: string[]): { copied: string[]; skippedRunning: string[]; missing: string[] } {
+    if (!this.shareable(id)) throw new Error('not_shareable')
+    const s = store()
+    const from = s.getProfile(fromProfileId)
+    if (!from) throw new Error('profile_not_found')
+    if (launcher.isRunning(from.id)) throw new Error('source_running')
+    const fromDir = launcher.userDataDir(from, s.settings)
+    const sources = this.dataDirs(fromDir, id).filter((p) => fs.existsSync(p))
+    if (!sources.length) throw new Error('no_extension_data')
+    const copied: string[] = []
+    const skippedRunning: string[] = []
+    const missing: string[] = []
+    for (const toId of toProfileIds) {
+      if (toId === from.id) continue
+      const to = s.getProfile(toId)
+      if (!to) { missing.push(toId); continue }
+      if (launcher.isRunning(to.id)) { skippedRunning.push(to.id); continue }
+      const toDir = launcher.userDataDir(to, s.settings)
+      const targets = this.dataDirs(toDir, id)
+      for (const t of targets) fs.rmSync(t, { recursive: true, force: true })
+      for (const src of sources) {
+        const rel = path.relative(fromDir, src)
+        const dst = path.join(toDir, rel)
+        fs.mkdirSync(path.dirname(dst), { recursive: true })
+        fs.cpSync(src, dst, { recursive: true, filter: (p) => !/LOCK$/.test(p) })
+      }
+      copied.push(to.id)
+    }
+    return { copied, skippedRunning, missing }
   }
 
   setAll(id: string, enabledForAll: boolean): InstalledExtension[] {

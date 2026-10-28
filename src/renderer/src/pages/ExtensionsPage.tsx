@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { PuzzlePiece, Trash, Check, ArrowSquareOut } from '@phosphor-icons/react'
-import type { FeaturedExtension } from '@shared/types'
+import { PuzzlePiece, Trash, Check, ArrowSquareOut, ShareNetwork } from '@phosphor-icons/react'
+import type { FeaturedExtension, InstalledExtension } from '@shared/types'
 import { useApp } from '@/store/app'
 import { useT, useI18n } from '@/lib/i18n'
 import { toast, friendlyError } from '@/store/toast'
-import { Button, Input, Toggle, cx } from '@/components/ui'
+import { Button, Input, Toggle, Modal, Select, Checkbox, cx } from '@/components/ui'
+import { SHAREABLE_EXTENSION_IDS } from '@shared/extensions'
 
 // Web Store extensions: paste an id or store URL, or pick from the curated
 // list. Installed ones load in every profile by default; switch that off to
@@ -17,6 +18,7 @@ export function ExtensionsPage(): JSX.Element {
   const [featured, setFeatured] = useState<FeaturedExtension[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+  const [share, setShare] = useState<InstalledExtension | null>(null)
 
   useEffect(() => {
     window.api.extensions.featured().then(setFeatured).catch(() => {})
@@ -111,6 +113,7 @@ export function ExtensionsPage(): JSX.Element {
                   <div className="w-44 shrink-0">
                     <Toggle checked={e.enabledForAll} onChange={(v) => setAll(e.id, v)} label={t('ext.allProfiles')} />
                   </div>
+                  {SHAREABLE_EXTENSION_IDS.includes(e.id) && <Button size="sm" icon={<ShareNetwork size={14} />} onClick={() => setShare(e)}>{t('ext.share')}</Button>}
                   <button className="focus-ring rounded p-1.5 text-fg-faint hover:text-fg" title={t('ext.openStore')} onClick={() => window.api.app.openExternal(`https://chromewebstore.google.com/detail/${e.id}`)}><ArrowSquareOut size={16} /></button>
                   <button className="focus-ring rounded p-1.5 text-fg-faint hover:text-danger" title={t('common.delete')} disabled={busy === e.id} onClick={() => remove(e.id)}><Trash size={16} /></button>
                 </li>
@@ -120,6 +123,79 @@ export function ExtensionsPage(): JSX.Element {
           <p className="text-[12px] leading-relaxed text-fg-faint">{t('ext.perProfileHint')}</p>
         </section>
       </div>
+      {share && <ShareDialog ext={share} onClose={() => setShare(null)} />}
     </div>
+  )
+}
+
+// Copies one extension's own data (sign-in, settings) from a profile where it
+// is set up into other closed profiles.
+function ShareDialog({ ext, onClose }: { ext: InstalledExtension; onClose: () => void }): JSX.Element {
+  const t = useT()
+  const profiles = useApp((s) => s.profiles)
+  const running = useApp((s) => s.running)
+  const runningIds = new Set(running.map((r) => r.profileId))
+  const [withData, setWithData] = useState<string[] | null>(null)
+  const [from, setFrom] = useState('')
+  const [targets, setTargets] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    window.api.extensions.dataProfiles(ext.id).then((ids) => {
+      setWithData(ids)
+      const byRecent = [...ids].sort((a, b) => (profiles.find((p) => p.id === b)?.lastLaunchedAt || 0) - (profiles.find((p) => p.id === a)?.lastLaunchedAt || 0))
+      const src = byRecent[0] || ''
+      setFrom(src)
+      setTargets(new Set(profiles.filter((p) => p.id !== src && !runningIds.has(p.id)).map((p) => p.id)))
+    }).catch(() => setWithData([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ext.id])
+
+  const toggle = (id: string, on: boolean): void => setTargets((prev) => { const n = new Set(prev); if (on) n.add(id); else n.delete(id); return n })
+  const run = async (): Promise<void> => {
+    if (!from || !targets.size) return
+    setBusy(true)
+    try {
+      const r = await window.api.extensions.copyData(ext.id, from, [...targets])
+      toast.ok(t('ext.shareDone', { n: String(r.copied.length) }) + (r.skippedRunning.length ? ' ' + t('ext.shareSkipped', { n: String(r.skippedRunning.length) }) : ''))
+      onClose()
+    } catch (e) {
+      toast.err(friendlyError(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`${t('ext.share')}: ${ext.name}`}
+      footer={<><Button onClick={onClose}>{t('common.cancel')}</Button><Button variant="primary" loading={busy} disabled={!from || !targets.size} onClick={run}>{t('ext.shareRun')}</Button></>}>
+      <div className="flex flex-col gap-4 text-[13px]">
+        <p className="leading-relaxed text-fg-muted">{t('ext.shareIntro')}</p>
+        {withData && withData.length === 0 ? (
+          <p className="text-warn">{t('ext.shareNoData')}</p>
+        ) : (
+          <>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-fg-muted">{t('ext.shareFrom')}</span>
+              <Select value={from} onChange={(e) => { setFrom(e.target.value); setTargets((prev) => { const n = new Set(prev); n.delete(e.target.value); return n }) }}>
+                {(withData || []).map((id) => { const p = profiles.find((x) => x.id === id); return <option key={id} value={id}>{p?.name || id}{runningIds.has(id) ? ` (${t('nav.running')})` : ''}</option> })}
+              </Select>
+            </label>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-fg-muted">{t('ext.shareTo')}</span>
+              <ul className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-[var(--radius-md)] border border-line p-2">
+                {profiles.filter((p) => p.id !== from).map((p) => (
+                  <li key={p.id} className="flex items-center gap-2.5">
+                    <Checkbox checked={targets.has(p.id)} onChange={(v) => toggle(p.id, v)} ariaLabel={p.name} />
+                    <span className={runningIds.has(p.id) ? 'text-fg-faint' : ''}>{p.name}</span>
+                    {runningIds.has(p.id) && <span className="text-[11px] text-warn">{t('ext.shareRunning')}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
   )
 }

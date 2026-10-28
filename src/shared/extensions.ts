@@ -18,6 +18,10 @@ export const FEATURED_EXTENSIONS: FeaturedExtension[] = [
   { id: 'eimadpbcbfnmbkopoojfekhnkhdbieeh', name: 'Dark Reader', blurb: ['Her site için karanlık tema.', 'Dark theme for every site.'] }
 ]
 
+// Only a password manager's own store may be copied between profiles (its
+// sign-in), and only on explicit request. Nothing else is ever shared.
+export const SHAREABLE_EXTENSION_IDS = ['aeblfdkhhhdcdjpifhhbdiojplfjncoa'] // 1Password
+
 export const WEBSTORE_ID_RE = /^[a-p]{32}$/
 
 // Accepts a bare id or any chromewebstore.google.com / chrome.google.com URL.

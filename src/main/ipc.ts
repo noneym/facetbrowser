@@ -248,6 +248,8 @@ export function registerIpc(): void {
   ipcMain.handle('extensions:install', async (_e, input: string) => { await extensions.install(input); return extensions.list() })
   ipcMain.handle('extensions:remove', (_e, id: string) => { extensions.remove(id); return extensions.list() })
   ipcMain.handle('extensions:setAll', (_e, id: string, on: boolean) => extensions.setAll(id, on))
+  ipcMain.handle('extensions:dataProfiles', (_e, id: string) => extensions.dataProfiles(id))
+  ipcMain.handle('extensions:copyData', (_e, id: string, from: string, to: string[]) => extensions.copyData(id, from, to))
 
   // ---- updates ---------------------------------------------------------
   updater.on('status', (st) => send('update:status', st))
