@@ -1,6 +1,6 @@
 import os from 'os'
 import type { AuthTokens, CloudSession, CookieBlobInfo, LicenseInfo, ProviderAccount, PublicUser, SyncCollection, SyncPushResponse, SyncRecord } from '@shared/cloud'
-import type { CookieRecord } from '@shared/types'
+import type { CookieRecord, StorageOrigin } from '@shared/types'
 import { store, uid } from '../store'
 
 export class CloudError extends Error {
@@ -123,8 +123,8 @@ export const cloud = {
 
   sync: (since: number, changes: Partial<Record<SyncCollection, SyncRecord[]>>): Promise<SyncPushResponse> => request('/sync', { body: { since, changes }, timeoutMs: 60000 }),
   cookieList: (): Promise<CookieBlobInfo[]> => request('/sync/cookies'),
-  cookieGet: (profileId: string): Promise<{ profileId: string; updatedAt: number; cookies: CookieRecord[] }> => request(`/sync/cookies/${encodeURIComponent(profileId)}`, { timeoutMs: 60000 }),
-  cookiePut: (profileId: string, updatedAt: number, cookies: CookieRecord[]): Promise<{ ok: true; skipped: boolean; serverUpdatedAt: number }> => request(`/sync/cookies/${encodeURIComponent(profileId)}`, { method: 'PUT', body: { updatedAt, cookies }, timeoutMs: 60000 }),
+  cookieGet: (profileId: string): Promise<{ profileId: string; updatedAt: number; cookies: CookieRecord[]; storage?: StorageOrigin[] }> => request(`/sync/cookies/${encodeURIComponent(profileId)}`, { timeoutMs: 60000 }),
+  cookiePut: (profileId: string, updatedAt: number, cookies: CookieRecord[], storage: StorageOrigin[]): Promise<{ ok: true; skipped: boolean; serverUpdatedAt: number }> => request(`/sync/cookies/${encodeURIComponent(profileId)}`, { method: 'PUT', body: { updatedAt, cookies, storage }, timeoutMs: 60000 }),
   cookieDelete: (profileId: string): Promise<void> => request(`/sync/cookies/${encodeURIComponent(profileId)}`, { method: 'DELETE' }),
 
   providerAccounts: (): Promise<ProviderAccount[]> => request('/proxy-accounts'),

@@ -1,8 +1,8 @@
-import { chromium, type BrowserContext } from 'playwright-core'
+import { chromium, type BrowserContext, type Page } from 'playwright-core'
 import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
-import type { CookieRecord, Profile, ProxyConfig, ProxyCheckResult, RunningProfile, Settings } from '@shared/types'
+import type { CookieRecord, Profile, ProxyConfig, ProxyCheckResult, RunningProfile, SessionJar, Settings, StorageOrigin } from '@shared/types'
 import { buildFingerprintScript } from './fingerprint-script'
 import { startBridge, type Bridge } from '../proxy/bridge'
 import { engine } from './engine'
@@ -12,6 +12,21 @@ interface Running {
   bridge: Bridge | null
   startedAt: number
   state: RunningProfile['state']
+  origins: Set<string> // http(s) origins navigated to in this run
+}
+
+// Limits for the localStorage part of the account jar (server cap is 8 MB).
+const STORAGE_ITEM_MAX = 256 * 1024
+const STORAGE_ORIGIN_MAX = 1024 * 1024
+const STORAGE_TOTAL_MAX = 6 * 1024 * 1024
+
+function originOf(url: string): string | null {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : null
+  } catch {
+    return null
+  }
 }
 
 export interface LaunchInput {
@@ -22,6 +37,12 @@ export interface LaunchInput {
 }
 
 // Chrome derives Accept-Language and navigator.languages from this pref.
+// exit_type is deliberately 'Crashed': Chromium only keeps session cookies
+// (the kind most logins use) across a restart when it believes the previous
+// run did not end cleanly. With a 'Normal' exit it purges them at the next
+// start, which logged the user out of every site. The crash bubble is hidden
+// with --hide-crash-restore-bubble and tabs are not restored, so the only
+// visible effect is that logins survive.
 function writeProfilePrefs(userDataDir: string, languages: string[]): void {
   const dir = path.join(userDataDir, 'Default')
   const file = path.join(dir, 'Preferences')
@@ -37,8 +58,8 @@ function writeProfilePrefs(userDataDir: string, languages: string[]): void {
   intl.selected_languages = languages.join(',')
   prefs.intl = intl
   const profile = (prefs.profile as Record<string, unknown>) || {}
-  profile.exit_type = 'Normal'
-  profile.exited_cleanly = true
+  profile.exit_type = 'Crashed'
+  profile.exited_cleanly = false
   prefs.profile = profile
   const bar = (prefs.bookmark_bar as Record<string, unknown>) || {}
   if (bar.show_on_all_tabs === undefined) bar.show_on_all_tabs = false
@@ -87,6 +108,10 @@ class Launcher extends EventEmitter {
     return r && r.state === 'running' ? r.context : undefined
   }
 
+  originsOf(id: string): string[] {
+    return [...(this.running.get(id)?.origins || [])]
+  }
+
   private emitStatus(): void {
     this.emit('status', this.list())
   }
@@ -108,7 +133,7 @@ class Launcher extends EventEmitter {
     let bridge: Bridge | null = null
     if (proxy) bridge = await startBridge(proxy)
 
-    const placeholder: Running = { context: null as unknown as BrowserContext, bridge, startedAt: Date.now(), state: 'starting' }
+    const placeholder: Running = { context: null as unknown as BrowserContext, bridge, startedAt: Date.now(), state: 'starting', origins: new Set() }
     this.running.set(profile.id, placeholder)
     this.emitStatus()
 
@@ -166,9 +191,18 @@ class Launcher extends EventEmitter {
 
       await context.addInitScript(buildFingerprintScript(fp, { publicIp: proxyInfo?.ip }))
 
-      const entry: Running = { context, bridge, startedAt: Date.now(), state: 'running' }
+      const entry: Running = { context, bridge, startedAt: Date.now(), state: 'running', origins: new Set() }
       this.running.set(profile.id, entry)
       context.on('close', () => this.cleanup(profile.id))
+      const track = (page: Page): void => {
+        page.on('framenavigated', (f) => {
+          if (f.parentFrame()) return
+          const o = originOf(f.url())
+          if (o) entry.origins.add(o)
+        })
+      }
+      context.pages().forEach(track)
+      context.on('page', track)
 
       if (!context.pages().length) await context.waitForEvent('page', { timeout: 5000 }).catch(() => null)
 
@@ -221,17 +255,20 @@ class Launcher extends EventEmitter {
   // directory is opened in a short-lived headless engine context.
   private async withContext<T>(profile: Profile, settings: Settings, fn: (ctx: BrowserContext) => Promise<T>): Promise<T> {
     const live = this.running.get(profile.id)
-    if (live && live.state === 'running') return fn(live.context)
+    if (live && (live.state === 'running' || live.state === 'stopping') && live.context) return fn(live.context)
     const exe = engine.exePath()
     if (!exe) throw new Error('engine_not_installed')
     const dir = this.userDataDir(profile, settings)
     fs.mkdirSync(dir, { recursive: true })
+    // Same prefs as a real launch, so session cookies survive this open too.
+    writeProfilePrefs(dir, profile.fingerprint.languages.length ? profile.fingerprint.languages : [profile.fingerprint.locale])
     const ctx = await chromium.launchPersistentContext(dir, {
       executablePath: exe,
       headless: true,
       chromiumSandbox: true,
       args: ['--no-first-run', '--no-default-browser-check', ...engineArgs(profile)],
-      ignoreDefaultArgs: ['--enable-automation']
+      ignoreDefaultArgs: ['--enable-automation'],
+      serviceWorkers: 'block'
     })
     try {
       return await fn(ctx)
@@ -261,6 +298,33 @@ class Launcher extends EventEmitter {
       await ctx.addCookies(clean)
       return clean.length
     })
+  }
+
+  // ---- full session (cookies + localStorage) for the account jar ---------
+  // localStorage is read and written over CDP's DOMStorage domain, which works
+  // for any origin in the profile without opening a tab for it.
+  async exportSession(profile: Profile, settings: Settings, knownOrigins: string[]): Promise<SessionJar> {
+    const r = this.running.get(profile.id)
+    const live = !!r && (r.state === 'running' || r.state === 'stopping') && !!r.context
+    return this.withContext(profile, settings, async (ctx) => {
+      const cookies = (await ctx.cookies()) as CookieRecord[]
+      const origins = new Set<string>([...knownOrigins, ...this.originsOf(profile.id)])
+      for (const p of safePageList(ctx)) {
+        const o = originOf(p.url())
+        if (o) origins.add(o)
+      }
+      const storage = await readStorage(ctx, [...origins], live).catch(() => [] as StorageOrigin[])
+      return { cookies, storage }
+    })
+  }
+
+  async importSession(profile: Profile, settings: Settings, jar: SessionJar): Promise<{ cookies: number; origins: number }> {
+    const cookies = await this.importCookies(profile, settings, jar.cookies)
+    let origins = 0
+    if (jar.storage?.length) {
+      origins = await this.withContext(profile, settings, (ctx) => writeStorage(ctx, jar.storage)).catch(() => 0)
+    }
+    return { cookies, origins }
   }
 
   async clearCookies(profile: Profile, settings: Settings): Promise<void> {
@@ -294,6 +358,93 @@ class Launcher extends EventEmitter {
     const to = this.userDataDir(dst, settings)
     if (fs.existsSync(from)) fs.cpSync(from, to, { recursive: true, filter: (p) => !/(Singleton|lockfile|\.lock$|Crashpad|GPUCache|Code Cache)/i.test(p) })
   }
+}
+
+function safePageList(ctx: BrowserContext): Page[] {
+  try {
+    return ctx.pages()
+  } catch {
+    return []
+  }
+}
+
+// localStorage per origin. Chromium has no API to read another origin's
+// storage without a frame on it, so (like Playwright's storageState) a hidden
+// page is pointed at the origin with every request answered locally; nothing
+// touches the network. Only used on headless contexts (never flashes a tab).
+async function withOriginPage<T>(ctx: BrowserContext, origin: string, fn: (page: Page) => Promise<T>): Promise<T | null> {
+  const page = await ctx.newPage()
+  try {
+    await page.route('**/*', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head></head><body></body></html>' }))
+    await page.goto(origin + '/', { waitUntil: 'commit', timeout: 8000 })
+    return await fn(page)
+  } catch {
+    return null
+  } finally {
+    await page.close().catch(() => {})
+  }
+}
+
+function clip(entries: Array<[string, string]>): Record<string, string> | null {
+  const items: Record<string, string> = {}
+  let size = 0
+  for (const [k, v] of entries) {
+    const len = k.length + String(v).length
+    if (len > STORAGE_ITEM_MAX || size + len > STORAGE_ORIGIN_MAX) continue
+    items[k] = String(v)
+    size += len
+  }
+  return Object.keys(items).length ? items : null
+}
+
+const READ_LS = (): Array<[string, string]> => Object.keys(localStorage).map((k) => [k, localStorage.getItem(k) || ''])
+
+// live: read from the tabs that are open (no navigation). headless: visit
+// every known origin on a hidden page.
+async function readStorage(ctx: BrowserContext, origins: string[], live: boolean): Promise<StorageOrigin[]> {
+  const out: StorageOrigin[] = []
+  let total = 0
+  const push = (origin: string, entries: Array<[string, string]> | null): boolean => {
+    if (!entries) return true
+    const items = clip(entries)
+    if (!items) return true
+    const size = JSON.stringify(items).length
+    if (total + size > STORAGE_TOTAL_MAX) return false
+    total += size
+    out.push({ origin, items })
+    return true
+  }
+  if (live) {
+    const seen = new Set<string>()
+    for (const page of safePageList(ctx)) {
+      const origin = originOf(page.url())
+      if (!origin || seen.has(origin)) continue
+      seen.add(origin)
+      const entries = await page.evaluate(READ_LS).catch(() => null)
+      if (!push(origin, entries)) break
+    }
+    return out
+  }
+  for (const origin of origins) {
+    const entries = await withOriginPage(ctx, origin, (p) => p.evaluate(READ_LS))
+    if (!push(origin, entries)) break
+  }
+  return out
+}
+
+async function writeStorage(ctx: BrowserContext, storage: StorageOrigin[]): Promise<number> {
+  let n = 0
+  for (const { origin, items } of storage) {
+    if (!originOf(origin) || !items || typeof items !== 'object') continue
+    const ok = await withOriginPage(ctx, origin, (p) =>
+      p.evaluate((entries) => {
+        for (const [k, v] of entries) localStorage.setItem(k, v)
+        return true
+      }, Object.entries(items).map(([k, v]) => [k, String(v)]))
+    )
+    if (ok) n++
+  }
+  return n
 }
 
 function safePages(ctx: BrowserContext): number {

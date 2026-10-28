@@ -7,7 +7,7 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 ## Features
 
 **Profiles**
-- Unlimited isolated profiles, each with its own user data directory (cookies, localStorage, sessions, extensions)
+- Unlimited isolated profiles, each with its own user data directory (cookies, localStorage, sessions, extensions). Logins survive closing the profile: session cookies are kept across restarts
 - Clone a profile 1-50 times, with a fresh fingerprint per copy or the same device identity
 - Tags, groups, favourites, notes, search and bulk actions (launch, stop, export, delete)
 - Import / export profiles as JSON, import / export cookies (Playwright JSON, EditThisCookie, Netscape cookies.txt)
@@ -31,7 +31,7 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 **Account and cloud sync** (backed by [FacetBrowser-web](https://github.com/noneym/FacetBrowser-web))
 - Sign in or register inside the app; 14-day trial, lifetime Starter (15 profiles) and Unlimited licenses
 - Profiles, proxies and groups sync between machines (last-write-wins, deletions propagate)
-- Cookie jars are uploaded while a profile runs and on stop, and pulled before launch when another machine saved a newer one
+- The session jar (cookies plus localStorage of visited sites) is uploaded while a profile runs and on stop, and pulled before launch when another machine saved a newer one, so logins follow the account between machines
 - Offline grace of 7 days on the last confirmed license; server address configurable in Settings
 
 **Proxy providers**

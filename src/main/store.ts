@@ -17,6 +17,9 @@ export interface CloudState {
   lastSyncAt: number
   tombstones: Tombstone[]
   cookieSync: Record<string, { localAt: number; serverAt: number }>
+  // Origins whose localStorage we have seen per profile; read back when the
+  // profile is not running (Chromium has no 'list all origins' API).
+  storageOrigins: Record<string, string[]>
 }
 
 interface Data {
@@ -46,7 +49,7 @@ export function defaultSettings(): Settings {
 }
 
 function defaultCloud(): CloudState {
-  return { session: null, deviceId: '', lastSyncAt: 0, tombstones: [], cookieSync: {} }
+  return { session: null, deviceId: '', lastSyncAt: 0, tombstones: [], cookieSync: {}, storageOrigins: {} }
 }
 
 class Store extends EventEmitter {
@@ -115,7 +118,10 @@ class Store extends EventEmitter {
     const set = new Set(ids)
     this.data.profiles = this.data.profiles.filter((p) => !set.has(p.id))
     if (!opts?.silent) for (const id of ids) this.addTombstone('profiles', id)
-    for (const id of ids) delete this.data.cloud.cookieSync[id]
+    for (const id of ids) {
+      delete this.data.cloud.cookieSync[id]
+      delete this.data.cloud.storageOrigins[id]
+    }
     this.changed(opts)
   }
 
@@ -177,6 +183,16 @@ class Store extends EventEmitter {
   }
   setCookieSync(profileId: string, v: { localAt: number; serverAt: number }): void {
     this.data.cloud.cookieSync[profileId] = v
+    this.scheduleSave()
+  }
+  storageOrigins(profileId: string): string[] {
+    return this.data.cloud.storageOrigins?.[profileId] || []
+  }
+  addStorageOrigins(profileId: string, origins: string[]): void {
+    if (!origins.length) return
+    if (!this.data.cloud.storageOrigins) this.data.cloud.storageOrigins = {}
+    const set = new Set([...(this.data.cloud.storageOrigins[profileId] || []), ...origins])
+    this.data.cloud.storageOrigins[profileId] = [...set].slice(-500)
     this.scheduleSave()
   }
   private addTombstone(collection: SyncCollection, id: string): void {

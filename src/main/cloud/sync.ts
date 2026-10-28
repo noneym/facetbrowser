@@ -10,9 +10,9 @@ const PERIOD_MS = 60000
 const COOKIE_PERIOD_MS = 45000
 
 // Keeps local store and the account in step. Last-write-wins per record on
-// `updatedAt`; deletions travel as tombstones. Cookies are handled per
-// profile: uploaded while a profile runs and on stop, downloaded before launch
-// when the server copy is newer.
+// `updatedAt`; deletions travel as tombstones. The session jar (cookies plus
+// localStorage) is handled per profile: uploaded while a profile runs and on
+// stop, downloaded before launch when the server copy is newer.
 class SyncEngine extends EventEmitter {
   private timer: NodeJS.Timeout | null = null
   private cookieTimer: NodeJS.Timeout | null = null
@@ -26,6 +26,8 @@ class SyncEngine extends EventEmitter {
     this.stop()
     this.timer = setInterval(() => this.run().catch(() => {}), PERIOD_MS)
     this.cookieTimer = setInterval(() => this.uploadRunningCookies().catch(() => {}), COOKIE_PERIOD_MS)
+    // On stop: a quick read from the live browser first (beforeStop), then a
+    // full read from disk once it has closed (covers tabs closed earlier).
     launcher.on('closed', (id: string) => this.uploadCookies(id).catch(() => {}))
     launcher.on('beforeStop', (id: string) => this.uploadCookies(id).catch(() => {}))
     this.run().catch(() => {})
@@ -167,12 +169,13 @@ class SyncEngine extends EventEmitter {
     if (!profile) return
     this.cookieBusy.add(profileId)
     try {
-      const cookies = await launcher.exportCookies(profile, s.settings)
+      const jar = await launcher.exportSession(profile, s.settings, s.storageOrigins(profileId))
+      s.addStorageOrigins(profileId, jar.storage.map((o) => o.origin))
       const now = Date.now()
-      const r = await cloud.cookiePut(profileId, now, cookies)
+      const r = await cloud.cookiePut(profileId, now, jar.cookies, jar.storage)
       const prev = s.cloud.cookieSync[profileId] || { localAt: 0, serverAt: 0 }
       s.setCookieSync(profileId, { localAt: now, serverAt: r.skipped ? Math.max(prev.serverAt, r.serverUpdatedAt) : now })
-      if (profile.cookieCount !== cookies.length) s.upsertProfile({ ...profile, cookieCount: cookies.length }, { silent: true, keepUpdatedAt: true })
+      if (profile.cookieCount !== jar.cookies.length) s.upsertProfile({ ...profile, cookieCount: jar.cookies.length }, { silent: true, keepUpdatedAt: true })
     } finally {
       this.cookieBusy.delete(profileId)
     }
@@ -191,7 +194,9 @@ class SyncEngine extends EventEmitter {
     const local = s.cloud.cookieSync[profileId] || { localAt: 0, serverAt: 0 }
     if (remote.updatedAt <= local.serverAt || remote.deviceId === s.cloud.deviceId) return false
     const blob = await cloud.cookieGet(profileId)
-    await launcher.importCookies(profile, s.settings, blob.cookies)
+    const storage = Array.isArray(blob.storage) ? blob.storage : []
+    await launcher.importSession(profile, s.settings, { cookies: blob.cookies, storage })
+    s.addStorageOrigins(profileId, storage.map((o) => o.origin))
     s.setCookieSync(profileId, { localAt: blob.updatedAt, serverAt: blob.updatedAt })
     return true
   }

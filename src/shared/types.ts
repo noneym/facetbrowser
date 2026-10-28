@@ -193,6 +193,28 @@ export interface AppInfo {
   engineVersion: string
 }
 
+// One origin's localStorage, carried next to the cookies in the account jar.
+export interface StorageOrigin {
+  origin: string
+  items: Record<string, string>
+}
+
+export interface SessionJar {
+  cookies: CookieRecord[]
+  storage: StorageOrigin[]
+}
+
+// One origin's localStorage, carried next to the cookies in the account jar.
+export interface StorageOrigin {
+  origin: string
+  items: Record<string, string>
+}
+
+export interface SessionJar {
+  cookies: CookieRecord[]
+  storage: StorageOrigin[]
+}
+
 export interface CookieRecord {
   name: string
   value: string
