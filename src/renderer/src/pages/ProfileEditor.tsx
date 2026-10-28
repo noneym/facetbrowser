@@ -7,7 +7,7 @@ import { toast, errMsg, friendlyError } from '@/store/toast'
 import { GenerateDialog, useProviderAccounts } from '@/components/Providers'
 import type { ProviderAccount } from '@shared/cloud'
 import { proxyShort, proxyLine, TIMEZONES, LOCALE_OPTIONS, osLabel } from '@/lib/format'
-import { Button, Drawer, Field, Input, Select, Tabs, TagInput, Textarea, Toggle, Segmented, Modal, Menu, cx } from '@/components/ui'
+import { Button, Drawer, Field, Input, Select, Tabs, TagInput, Textarea, Toggle, Segmented, Modal, Menu, Checkbox, cx } from '@/components/ui'
 import { GradeBadge } from '@/components/GradeBadge'
 import { ProxyDetail } from './ProxiesPage'
 
@@ -487,8 +487,34 @@ function CookiesTab({ draft, isNew }: { draft: Profile; isNew: boolean }): JSX.E
 function AdvancedTab({ draft, patch }: { draft: Profile; patch: (p: Partial<Profile>) => void }): JSX.Element {
   const t = useT()
   const settings = useApp((s) => s.settings)!
+  const extensions = useApp((s) => s.extensions)
+  const setPage = useApp((s) => s.setPage)
+  const closeEditor = useApp((s) => s.closeEditor)
+  const picked = new Set(draft.extensionIds || [])
+  const togglePick = (id: string, on: boolean): void => {
+    const next = new Set(picked)
+    if (on) next.add(id)
+    else next.delete(id)
+    patch({ extensionIds: [...next] })
+  }
   return (
     <div className="flex flex-col gap-5">
+      <Field label={t('ext.title')} hint={t('ext.editorHint')}>
+        {extensions.length === 0 ? (
+          <button type="button" className="text-left text-[12.5px] text-accent hover:underline" onClick={() => { closeEditor(); setPage('extensions') }}>{t('ext.editorEmpty')}</button>
+        ) : (
+          <ul className="flex flex-col gap-1.5">
+            {extensions.map((e) => (
+              <li key={e.id} className="flex items-center gap-2.5 text-[13px]">
+                <Checkbox checked={e.enabledForAll || picked.has(e.id)} onChange={(v) => togglePick(e.id, v)} ariaLabel={e.name} />
+                {e.icon && <img src={e.icon} alt="" className="h-4 w-4 rounded-sm" />}
+                <span className={e.enabledForAll ? 'text-fg-muted' : ''}>{e.name}</span>
+                {e.enabledForAll && <span className="text-[11px] text-fg-faint">{t('ext.allProfilesTag')}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Field>
       <Field label={t('editor.extensions')} hint={t('editor.extensions.hint')}>
         <Textarea rows={3} value={draft.extensions.join('\n')} onChange={(e) => patch({ extensions: e.target.value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) })} placeholder="C:\\extensions\\my-extension" />
       </Field>

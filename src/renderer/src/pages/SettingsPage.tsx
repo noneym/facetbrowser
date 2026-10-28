@@ -120,7 +120,7 @@ function UpdateSection(): JSX.Element {
     : st === 'available' ? t('update.available', { v: update?.version || '' })
     : st === 'downloading' ? t('update.downloading', { p: String(update?.progress ?? 0) })
     : st === 'ready' ? t('update.ready', { v: update?.version || '' })
-    : st === 'error' ? t('update.error', { e: update?.error || '' })
+    : st === 'error' ? (update?.error === 'not_found' ? t('update.errNotFound') : update?.error === 'offline' ? t('update.errOffline') : update?.error === 'checksum' ? t('update.errChecksum') : t('update.error', { e: update?.error || '' }))
     : st === 'unsupported' ? t('update.unsupported')
     : t('update.idle')
   return (
@@ -137,7 +137,7 @@ function UpdateSection(): JSX.Element {
         ) : st === 'available' ? (
           <Button variant="primary" loading={busy} onClick={() => run(() => window.api.update.download())}>{t('update.download')}</Button>
         ) : (
-          <Button loading={busy || st === 'checking'} disabled={st === 'downloading'} onClick={() => run(() => window.api.update.check())}>{t('update.check')}</Button>
+          <Button loading={busy || st === 'checking'} disabled={st === 'downloading'} onClick={() => run(() => window.api.update.check())}>{st === 'error' ? t('update.retry') : t('update.check')}</Button>
         )}
       </div>
       {st === 'downloading' && (

@@ -6,6 +6,7 @@ import { ProfilesPage } from '@/pages/ProfilesPage'
 import { ProfileEditor } from '@/pages/ProfileEditor'
 import { ProxiesPage } from '@/pages/ProxiesPage'
 import { CheckerPage } from '@/pages/CheckerPage'
+import { ExtensionsPage } from '@/pages/ExtensionsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { AuthScreen } from '@/pages/AuthScreen'
 import { EngineSetup } from '@/pages/EngineSetup'
@@ -54,6 +55,8 @@ export default function App(): JSX.Element {
             <ProfilesPage />
           ) : page === 'proxies' ? (
             <ProxiesPage />
+          ) : page === 'extensions' ? (
+            <ExtensionsPage />
           ) : page === 'checker' ? (
             <CheckerPage />
           ) : (

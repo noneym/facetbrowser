@@ -39,6 +39,7 @@ export interface LaunchInput {
   proxy: ProxyConfig | null
   proxyInfo?: ProxyCheckResult
   settings: Settings
+  extensionDirs?: string[] // Web Store extensions resolved by the caller
 }
 
 // Chrome derives Accept-Language and navigator.languages from this pref.
@@ -176,7 +177,7 @@ class Launcher extends EventEmitter {
         args.push('--proxy-bypass-list=<-loopback>')
       }
       if (fp.webrtc === 'real') args.push('--force-webrtc-ip-handling-policy=default')
-      const extensions = profile.extensions.filter((e) => e && fs.existsSync(e))
+      const extensions = [...new Set([...profile.extensions, ...(input.extensionDirs || [])])].filter((e) => e && fs.existsSync(e))
       if (extensions.length) {
         args.push(`--disable-extensions-except=${extensions.join(',')}`)
         args.push(`--load-extension=${extensions.join(',')}`)

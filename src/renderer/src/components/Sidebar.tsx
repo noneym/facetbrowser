@@ -1,4 +1,4 @@
-import { ArrowCircleUp, UserCircle, Globe, Pulse, GearSix, Warning } from '@phosphor-icons/react'
+import { ArrowCircleUp, UserCircle, Globe, Pulse, GearSix, Warning, PuzzlePiece } from '@phosphor-icons/react'
 import { useApp, type Page } from '@/store/app'
 import { useT } from '@/lib/i18n'
 import { cx } from './ui'
@@ -14,10 +14,12 @@ export function Sidebar(): JSX.Element {
   const profiles = useApp((s) => s.profiles)
   const proxies = useApp((s) => s.proxies)
   const update = useApp((s) => s.update)
+  const extensions = useApp((s) => s.extensions)
 
   const items: Array<{ id: Page; label: string; icon: JSX.Element; count?: number }> = [
     { id: 'profiles', label: t('nav.profiles'), icon: <UserCircle size={18} />, count: profiles.length },
     { id: 'proxies', label: t('nav.proxies'), icon: <Globe size={18} />, count: proxies.length },
+    { id: 'extensions', label: t('nav.extensions'), icon: <PuzzlePiece size={18} />, count: extensions.length },
     { id: 'checker', label: t('nav.checker'), icon: <Pulse size={18} /> },
     { id: 'settings', label: t('nav.settings'), icon: <GearSix size={18} /> }
   ]

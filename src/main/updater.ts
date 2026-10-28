@@ -58,7 +58,7 @@ class Updater extends EventEmitter {
     autoUpdater.on('update-not-available', (info: UpdateInfo) => this.set({ state: 'none', version: info.version, checkedAt: Date.now() }))
     autoUpdater.on('download-progress', (p: { percent: number }) => this.set({ state: 'downloading', progress: Math.round(p.percent) }))
     autoUpdater.on('update-downloaded', (info: UpdateInfo) => this.set({ state: 'ready', version: info.version, progress: 100 }))
-    autoUpdater.on('error', (e: Error) => this.set({ state: 'error', error: e?.message || String(e) }))
+    autoUpdater.on('error', (e: Error) => this.set({ state: 'error', error: shortError(e) }))
     setTimeout(() => this.check().catch(() => {}), FIRST_CHECK_MS)
     setInterval(() => this.check().catch(() => {}), PERIOD_MS)
   }
@@ -69,7 +69,7 @@ class Updater extends EventEmitter {
     try {
       await autoUpdater.checkForUpdates()
     } catch (e) {
-      this.set({ state: 'error', error: (e as Error).message })
+      this.set({ state: 'error', error: shortError(e as Error) })
     }
     return this.st
   }
@@ -79,7 +79,7 @@ class Updater extends EventEmitter {
     try {
       await autoUpdater.downloadUpdate()
     } catch (e) {
-      this.set({ state: 'error', error: (e as Error).message })
+      this.set({ state: 'error', error: shortError(e as Error) })
     }
     return this.st
   }
@@ -89,6 +89,16 @@ class Updater extends EventEmitter {
     this.log('updater: quitAndInstall')
     setImmediate(() => autoUpdater.quitAndInstall(false, true))
   }
+}
+
+// electron-updater errors carry full HTTP dumps and stack traces; keep a
+// one-line reason the UI can show next to a retry button.
+function shortError(e: Error | undefined): string {
+  const m = String(e?.message || e || 'unknown')
+  if (/404|Cannot find channel/i.test(m)) return 'not_found'
+  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|net::ERR_/i.test(m)) return 'offline'
+  if (/sha512|checksum/i.test(m)) return 'checksum'
+  return m.split('\n')[0].slice(0, 140)
 }
 
 export const updater = new Updater()

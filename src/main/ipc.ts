@@ -15,6 +15,8 @@ import { cloud, CloudError } from './cloud/client'
 import { sync } from './cloud/sync'
 import { providers, providerMeta } from './providers'
 import { updater } from './updater'
+import { extensions } from './extensions'
+import { FEATURED_EXTENSIONS } from '@shared/extensions'
 import type { ProviderAccount, ProviderGenerateOptions } from '@shared/cloud'
 
 function win(): BrowserWindow | null {
@@ -232,13 +234,20 @@ export function registerIpc(): void {
     if (!gate.ok) throw new Error(gate.reason)
     await sync.pullCookiesIfNewer(id).catch(() => {})
     const { config, info } = resolveProxy(p)
-    await launcher.launch({ profile: p, proxy: config, proxyInfo: info, settings: s.settings })
+    await launcher.launch({ profile: p, proxy: config, proxyInfo: info, settings: s.settings, extensionDirs: extensions.dirsFor(p) })
     p.launchCount = (p.launchCount || 0) + 1
     p.lastLaunchedAt = Date.now()
     s.upsertProfile(p)
     return p
   })
   ipcMain.handle('browser:stop', (_e, id: string) => launcher.stop(id))
+
+  // ---- extensions ------------------------------------------------------
+  ipcMain.handle('extensions:list', () => extensions.list())
+  ipcMain.handle('extensions:featured', () => FEATURED_EXTENSIONS)
+  ipcMain.handle('extensions:install', async (_e, input: string) => { await extensions.install(input); return extensions.list() })
+  ipcMain.handle('extensions:remove', (_e, id: string) => { extensions.remove(id); return extensions.list() })
+  ipcMain.handle('extensions:setAll', (_e, id: string, on: boolean) => extensions.setAll(id, on))
 
   // ---- updates ---------------------------------------------------------
   updater.on('status', (st) => send('update:status', st))

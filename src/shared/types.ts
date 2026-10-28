@@ -110,7 +110,8 @@ export interface Profile {
   fingerprint: Fingerprint
   startUrls: string[]
   lastTabs?: string[] // tabs open when the profile was last closed; reopened on launch
-  extensions: string[]
+  extensions: string[] // unpacked extension folders (advanced)
+  extensionIds?: string[] // Web Store extensions picked for this profile (on top of the ones enabled for all)
   createdAt: number
   updatedAt: number
   lastLaunchedAt?: number
@@ -185,6 +186,24 @@ export interface EngineStatus {
   downloading: boolean
   progress: number
   error: string | null
+}
+
+// A Chrome Web Store extension downloaded into <userData>/extensions/<id>.
+export interface InstalledExtension {
+  id: string
+  name: string
+  version: string
+  dir: string
+  icon?: string // data URL
+  enabledForAll: boolean // loaded in every profile; otherwise only where picked
+  installedAt: number
+}
+
+export interface FeaturedExtension {
+  id: string
+  name: string
+  blurb: [string, string] // tr, en
+  highlight?: boolean
 }
 
 export interface UpdateStatus {

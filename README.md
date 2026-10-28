@@ -28,6 +28,10 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 - `navigator.webdriver` false, no automation banner, native-looking overrides (`toString` returns `[native code]`)
 - Launch flags are kept to the bare minimum (no `--no-sandbox`, none of Playwright's `--disable-features` list). The engine applies the user agent, client hints and platform itself from `--fingerprint-platform`, so cross-OS profiles need no CDP override.
 
+**Extensions**
+- Install Chrome Web Store extensions from the Extensions page (paste a store link or id, or pick from the featured list: 1Password, Bitwarden, Cookie-Editor, uBlock Origin Lite, MetaMask and more). The CRX is fetched from Google's update service, unpacked under the data folder and loaded in every profile (or only in profiles you pick). The publisher key is written into the manifest so the extension keeps its real Web Store id
+- Each profile has its own extension storage, so a password manager is signed in once per profile. The desktop 1Password app does not connect to the unsigned engine; the extension works standalone
+
 **Account and cloud sync** (backed by [FacetBrowser-web](https://github.com/noneym/FacetBrowser-web))
 - Sign in or register inside the app; 14-day trial, lifetime Starter (15 profiles) and Unlimited licenses
 - Profiles, proxies and groups sync between machines (last-write-wins, deletions propagate)

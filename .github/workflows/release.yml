@@ -20,6 +20,8 @@ jobs:
     runs-on: windows-latest
     env:
       FACET_ADMIN_TOKEN: ${{ secrets.FACET_ADMIN_TOKEN }}
+      # Origin host: uploads go around Cloudflare, whose proxy caps request bodies at 100 MB.
+      FACET_UPLOAD_ORIGIN: https://facetbrowser-web-facetbrowser.epyc-ana-ser-womi.dockerxo.dev
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,7 +75,7 @@ jobs:
           for f in release/FacetBrowser-Setup-*.exe release/FacetBrowser-*-portable.exe release/latest.yml; do
             name=$(basename "$f")
             echo "uploading $name"
-            curl --fail -sS -T "$f" -H "x-admin-token: $FACET_ADMIN_TOKEN" "https://facetbrowser.com/api/admin/releases/$name"
+            curl --fail -sS -T "$f" -H "x-admin-token: $FACET_ADMIN_TOKEN" "$FACET_UPLOAD_ORIGIN/api/admin/releases/$name"
             echo
           done
 
@@ -82,6 +84,8 @@ jobs:
     needs: windows
     env:
       FACET_ADMIN_TOKEN: ${{ secrets.FACET_ADMIN_TOKEN }}
+      # Origin host: uploads go around Cloudflare, whose proxy caps request bodies at 100 MB.
+      FACET_UPLOAD_ORIGIN: https://facetbrowser-web-facetbrowser.epyc-ana-ser-womi.dockerxo.dev
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
@@ -130,6 +134,6 @@ jobs:
           for f in release/FacetBrowser-*-mac-*.dmg; do
             name=$(basename "$f")
             echo "uploading $name"
-            curl --fail -sS -T "$f" -H "x-admin-token: $FACET_ADMIN_TOKEN" "https://facetbrowser.com/api/admin/releases/$name"
+            curl --fail -sS -T "$f" -H "x-admin-token: $FACET_ADMIN_TOKEN" "$FACET_UPLOAD_ORIGIN/api/admin/releases/$name"
             echo
           done

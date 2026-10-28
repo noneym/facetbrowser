@@ -2,7 +2,7 @@ import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
-import type { Group, Profile, SavedProxy, Settings } from '@shared/types'
+import type { Group, Profile, SavedProxy, Settings, InstalledExtension } from '@shared/types'
 import type { CloudSession, SyncCollection } from '@shared/cloud'
 
 export interface Tombstone {
@@ -28,6 +28,7 @@ interface Data {
   groups: Group[]
   settings: Settings
   cloud: CloudState
+  extensions: InstalledExtension[] // local only (files live on this machine)
 }
 
 interface WriteOpts {
@@ -65,7 +66,7 @@ class Store extends EventEmitter {
   }
 
   private load(): Data {
-    const empty: Data = { profiles: [], proxies: [], groups: [], settings: defaultSettings(), cloud: defaultCloud() }
+    const empty: Data = { profiles: [], proxies: [], groups: [], settings: defaultSettings(), cloud: defaultCloud(), extensions: [] }
     try {
       if (fs.existsSync(this.file)) {
         const parsed = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<Data>
@@ -74,7 +75,8 @@ class Store extends EventEmitter {
           proxies: parsed.proxies || [],
           groups: parsed.groups || [],
           settings: { ...defaultSettings(), ...(parsed.settings || {}) },
-          cloud: { ...defaultCloud(), ...(parsed.cloud || {}) }
+          cloud: { ...defaultCloud(), ...(parsed.cloud || {}) },
+          extensions: parsed.extensions || []
         }
       }
     } catch (e) {
@@ -173,6 +175,19 @@ class Store extends EventEmitter {
     this.data.settings = { ...this.data.settings, ...patch }
     this.scheduleSave()
     return this.data.settings
+  }
+
+  // ---- extensions (local)
+  get extensions(): InstalledExtension[] { return this.data.extensions }
+  upsertExtension(e: InstalledExtension): void {
+    const i = this.data.extensions.findIndex((x) => x.id === e.id)
+    if (i === -1) this.data.extensions.push(e)
+    else this.data.extensions[i] = e
+    this.scheduleSave()
+  }
+  deleteExtension(id: string): void {
+    this.data.extensions = this.data.extensions.filter((x) => x.id !== id)
+    this.scheduleSave()
   }
 
   // ---- cloud

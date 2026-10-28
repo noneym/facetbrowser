@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import { toast } from './toast'
 import { t } from '@/lib/i18n'
-import type { AppInfo, EngineStatus, Group, Profile, ProxyCheckResult, RunningProfile, SavedProxy, Settings, UpdateStatus } from '@shared/types'
+import type { AppInfo, EngineStatus, Group, Profile, ProxyCheckResult, RunningProfile, SavedProxy, Settings, UpdateStatus, InstalledExtension } from '@shared/types'
 import type { CloudStatus } from '@shared/cloud'
 import { useI18n } from '@/lib/i18n'
 
-export type Page = 'profiles' | 'proxies' | 'checker' | 'settings'
+export type Page = 'profiles' | 'proxies' | 'extensions' | 'checker' | 'settings'
 
 interface AppState {
   ready: boolean
@@ -22,6 +22,7 @@ interface AppState {
   cloud: CloudStatus | null
   engine: EngineStatus | null
   update: UpdateStatus | null
+  extensions: InstalledExtension[]
 
   init: () => Promise<void>
   setPage: (p: Page) => void
@@ -38,6 +39,8 @@ interface AppState {
   setCloud: (c: CloudStatus) => void
   setEngine: (e: EngineStatus) => void
   setUpdate: (u: UpdateStatus) => void
+  setExtensions: (list: InstalledExtension[]) => void
+  refreshExtensions: () => Promise<void>
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -55,6 +58,7 @@ export const useApp = create<AppState>((set, get) => ({
   cloud: null,
   engine: null,
   update: null,
+  extensions: [],
 
   init: async () => {
     const [settings, profiles, proxies, groups, running, info, cloud, engine] = await Promise.all([
@@ -71,6 +75,7 @@ export const useApp = create<AppState>((set, get) => ({
     set({ settings, profiles, proxies, groups, running, info, cloud, engine, ready: true })
     window.api.engine.onStatus((engine) => { set({ engine }); get().refreshInfo() })
     window.api.update.status().then((update) => set({ update })).catch(() => {})
+    window.api.extensions.list().then((extensions) => set({ extensions })).catch(() => {})
     window.api.update.onStatus((update) => {
       const was = get().update?.state
       set({ update })
@@ -111,5 +116,7 @@ export const useApp = create<AppState>((set, get) => ({
   setProfiles: (profiles) => set({ profiles }),
   setCloud: (cloud) => set({ cloud }),
   setEngine: (engine) => set({ engine }),
-  setUpdate: (update) => set({ update })
+  setUpdate: (update) => set({ update }),
+  setExtensions: (extensions) => set({ extensions }),
+  refreshExtensions: async () => set({ extensions: await window.api.extensions.list() })
 }))

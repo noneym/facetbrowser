@@ -41,6 +41,7 @@ export function friendlyError(e: unknown): string {
   const gate = ['not_logged_in', 'email_not_verified', 'plan_inactive', 'offline_too_long', 'profile_limit']
   if (gate.includes(code)) return t(`gate.${code}` as Key)
   if (code === 'engine_not_installed') return t('engine.needed')
+  if (code === 'bad_extension_id' || code === 'extension_not_found' || code === 'bad_extension_package') return t(`ext.err.${code}` as Key)
   if (code.startsWith('network')) return t('auth.err.network')
   return code
 }
