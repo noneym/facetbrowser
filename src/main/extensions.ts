@@ -154,6 +154,51 @@ class ExtensionManager {
     return { copied, skippedRunning, missing }
   }
 
+  // Standing rule: `from` is the master copy of this extension's store; every
+  // other profile receives it when launched (and right away for the closed
+  // ones). null stops sharing. Only this extension's folders are involved.
+  setShare(id: string, from: string | null): { list: InstalledExtension[]; copied: string[]; skippedRunning: string[] } {
+    const s = store()
+    const e = s.extensions.find((x) => x.id === id)
+    if (!e) throw new Error('extension_not_found')
+    if (from && !s.getProfile(from)) throw new Error('profile_not_found')
+    s.upsertExtension({ ...e, shareFrom: from || undefined })
+    let copied: string[] = []
+    let skippedRunning: string[] = []
+    if (from) {
+      const targets = s.profiles.filter((p) => p.id !== from).map((p) => p.id)
+      if (targets.length) {
+        const r = this.copyData(id, from, targets)
+        copied = r.copied
+        skippedRunning = r.skippedRunning
+      }
+    }
+    return { list: this.list(), copied, skippedRunning }
+  }
+
+  // Called before a profile launches: pull shared extension stores from their
+  // source profiles. A running source is skipped (its files are in use).
+  applyShares(profile: Profile): string[] {
+    const applied: string[] = []
+    for (const e of this.list()) {
+      if (!e.shareFrom || e.shareFrom === profile.id) continue
+      if (launcher.isRunning(e.shareFrom)) continue
+      try {
+        const r = this.copyData(e.id, e.shareFrom, [profile.id])
+        if (r.copied.length) applied.push(e.id)
+      } catch {
+        /* source has no data yet, or profile vanished: nothing to apply */
+      }
+    }
+    return applied
+  }
+
+  // A deleted profile can no longer be a share source.
+  forgetProfiles(ids: string[]): void {
+    const set = new Set(ids)
+    for (const e of store().extensions) if (e.shareFrom && set.has(e.shareFrom)) store().upsertExtension({ ...e, shareFrom: undefined })
+  }
+
   setAll(id: string, enabledForAll: boolean): InstalledExtension[] {
     const e = store().extensions.find((x) => x.id === id)
     if (e) store().upsertExtension({ ...e, enabledForAll })

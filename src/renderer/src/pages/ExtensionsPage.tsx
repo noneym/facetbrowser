@@ -14,6 +14,7 @@ export function ExtensionsPage(): JSX.Element {
   const lang = useI18n((s) => s.lang)
   const extensions = useApp((s) => s.extensions)
   const setExtensions = useApp((s) => s.setExtensions)
+  const profiles = useApp((s) => s.profiles)
   const [featured, setFeatured] = useState<FeaturedExtension[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -47,6 +48,11 @@ export function ExtensionsPage(): JSX.Element {
     }
   }
   const setAll = async (id: string, on: boolean): Promise<void> => setExtensions(await window.api.extensions.setAll(id, on))
+  const stopShare = async (id: string): Promise<void> => {
+    const r = await window.api.extensions.setShare(id, null)
+    setExtensions(r.list)
+    toast.ok(t('ext.sharingStopped'))
+  }
 
   return (
     <div className="h-full overflow-y-auto">
@@ -108,6 +114,12 @@ export function ExtensionsPage(): JSX.Element {
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-[13.5px] font-medium">{e.name}</span>
                     <span className="truncate font-mono text-[11px] text-fg-faint">v{e.version} · {e.id}</span>
+                    {e.shareFrom && (
+                      <span className="mt-0.5 flex items-center gap-2 text-[11.5px] text-accent">
+                        {t('ext.sharingFrom', { p: profiles.find((p) => p.id === e.shareFrom)?.name || '?' })}
+                        <button className="text-fg-faint hover:text-fg hover:underline" onClick={() => stopShare(e.id)}>{t('ext.stopSharing')}</button>
+                      </span>
+                    )}
                   </div>
                   <div className="w-44 shrink-0">
                     <Toggle checked={e.enabledForAll} onChange={(v) => setAll(e.id, v)} label={t('ext.allProfiles')} />
@@ -122,14 +134,14 @@ export function ExtensionsPage(): JSX.Element {
           <p className="text-[12px] leading-relaxed text-fg-faint">{t('ext.perProfileHint')}</p>
         </section>
       </div>
-      {share && <ShareDialog ext={share} onClose={() => setShare(null)} />}
+      {share && <ShareDialog ext={share} onClose={() => setShare(null)} onChanged={setExtensions} />}
     </div>
   )
 }
 
 // Copies one extension's own data (sign-in, settings) from a profile where it
 // is set up into other closed profiles.
-function ShareDialog({ ext, onClose }: { ext: InstalledExtension; onClose: () => void }): JSX.Element {
+function ShareDialog({ ext, onClose, onChanged }: { ext: InstalledExtension; onClose: () => void; onChanged: (list: InstalledExtension[]) => void }): JSX.Element {
   const t = useT()
   const profiles = useApp((s) => s.profiles)
   const running = useApp((s) => s.running)
@@ -138,6 +150,7 @@ function ShareDialog({ ext, onClose }: { ext: InstalledExtension; onClose: () =>
   const [from, setFrom] = useState('')
   const [targets, setTargets] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
+  const [always, setAlways] = useState(!!ext.shareFrom)
 
   useEffect(() => {
     window.api.extensions.dataProfiles(ext.id).then((ids) => {
@@ -152,11 +165,17 @@ function ShareDialog({ ext, onClose }: { ext: InstalledExtension; onClose: () =>
 
   const toggle = (id: string, on: boolean): void => setTargets((prev) => { const n = new Set(prev); if (on) n.add(id); else n.delete(id); return n })
   const run = async (): Promise<void> => {
-    if (!from || !targets.size) return
+    if (!from || (!always && !targets.size)) return
     setBusy(true)
     try {
-      const r = await window.api.extensions.copyData(ext.id, from, [...targets])
-      toast.ok(t('ext.shareDone', { n: String(r.copied.length) }) + (r.skippedRunning.length ? ' ' + t('ext.shareSkipped', { n: String(r.skippedRunning.length) }) : ''))
+      if (always) {
+        const r = await window.api.extensions.setShare(ext.id, from)
+        onChanged(r.list)
+        toast.ok(t('ext.shareAlwaysOn', { n: String(r.copied.length) }) + (r.skippedRunning.length ? ' ' + t('ext.shareSkipped', { n: String(r.skippedRunning.length) }) : ''))
+      } else {
+        const r = await window.api.extensions.copyData(ext.id, from, [...targets])
+        toast.ok(t('ext.shareDone', { n: String(r.copied.length) }) + (r.skippedRunning.length ? ' ' + t('ext.shareSkipped', { n: String(r.skippedRunning.length) }) : ''))
+      }
       onClose()
     } catch (e) {
       toast.err(friendlyError(e))
@@ -167,7 +186,7 @@ function ShareDialog({ ext, onClose }: { ext: InstalledExtension; onClose: () =>
 
   return (
     <Modal open onClose={onClose} title={`${t('ext.share')}: ${ext.name}`}
-      footer={<><Button onClick={onClose}>{t('common.cancel')}</Button><Button variant="primary" loading={busy} disabled={!from || !targets.size} onClick={run}>{t('ext.shareRun')}</Button></>}>
+      footer={<><Button onClick={onClose}>{t('common.cancel')}</Button><Button variant="primary" loading={busy} disabled={!from || (!always && !targets.size)} onClick={run}>{always ? t('ext.shareAlwaysRun') : t('ext.shareRun')}</Button></>}>
       <div className="flex flex-col gap-4 text-[13px]">
         <p className="leading-relaxed text-fg-muted">{t('ext.shareIntro')}</p>
         {withData && withData.length === 0 ? (
@@ -180,6 +199,8 @@ function ShareDialog({ ext, onClose }: { ext: InstalledExtension; onClose: () =>
                 {(withData || []).map((id) => { const p = profiles.find((x) => x.id === id); return <option key={id} value={id}>{p?.name || id}{runningIds.has(id) ? ` (${t('nav.running')})` : ''}</option> })}
               </Select>
             </label>
+            <Toggle checked={always} onChange={setAlways} label={t('ext.shareAlways')} hint={t('ext.shareAlwaysHint')} />
+            {!always && (
             <div className="flex flex-col gap-1.5">
               <span className="text-fg-muted">{t('ext.shareTo')}</span>
               <ul className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-[var(--radius-md)] border border-line p-2">
@@ -192,6 +213,7 @@ function ShareDialog({ ext, onClose }: { ext: InstalledExtension; onClose: () =>
                 ))}
               </ul>
             </div>
+            )}
           </>
         )}
       </div>

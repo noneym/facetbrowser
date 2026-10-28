@@ -130,6 +130,7 @@ export function registerIpc(): void {
     return s.upsertProfile(p)
   })
   ipcMain.handle('profiles:delete', async (_e, ids: string[], wipeData: boolean) => {
+    extensions.forgetProfiles(ids)
     for (const id of ids) {
       if (launcher.isRunning(id)) await launcher.stop(id)
       const p = s.getProfile(id)
@@ -233,6 +234,7 @@ export function registerIpc(): void {
     const gate = sync.licenseGate()
     if (!gate.ok) throw new Error(gate.reason)
     await sync.pullCookiesIfNewer(id).catch(() => {})
+    extensions.applyShares(p)
     const { config, info } = resolveProxy(p)
     await launcher.launch({ profile: p, proxy: config, proxyInfo: info, settings: s.settings, extensionDirs: extensions.dirsFor(p) })
     p.launchCount = (p.launchCount || 0) + 1
@@ -250,6 +252,7 @@ export function registerIpc(): void {
   ipcMain.handle('extensions:setAll', (_e, id: string, on: boolean) => extensions.setAll(id, on))
   ipcMain.handle('extensions:dataProfiles', (_e, id: string) => extensions.dataProfiles(id))
   ipcMain.handle('extensions:copyData', (_e, id: string, from: string, to: string[]) => extensions.copyData(id, from, to))
+  ipcMain.handle('extensions:setShare', (_e, id: string, from: string | null) => extensions.setShare(id, from))
 
   // ---- updates ---------------------------------------------------------
   updater.on('status', (st) => send('update:status', st))

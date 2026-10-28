@@ -196,6 +196,7 @@ export interface InstalledExtension {
   dir: string
   icon?: string // data URL
   enabledForAll: boolean // loaded in every profile; otherwise only where picked
+  shareFrom?: string // profile id whose copy of this extension's store is copied into every other profile at launch
   installedAt: number
 }
 
