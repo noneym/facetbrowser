@@ -4,6 +4,7 @@ import path from 'path'
 import { createHash } from 'crypto'
 import { EventEmitter } from 'events'
 import { execFileSync } from 'child_process'
+import os from 'os'
 
 // The FacetBrowser Engine: a fingerprint-chromium build (BSD-3-Clause,
 // github.com/adryfish/fingerprint-chromium) that spoofs canvas, WebGL, audio,
@@ -17,12 +18,12 @@ export interface EngineRelease {
   url: string
   mirror?: string
   sha256?: string
-  platform: 'win32'
-  arch: 'x64'
+  platform: 'win32' | 'darwin'
+  arch: 'x64' | 'arm64' | 'universal'
 }
 
 export interface EngineStatus {
-  supported: boolean // only Windows x64 builds exist today
+  supported: boolean // Windows x64 and macOS builds exist today
   installed: boolean
   installedVersion: string | null
   exePath: string | null
@@ -42,8 +43,37 @@ export const KNOWN_RELEASES: EngineRelease[] = [
     mirror: 'https://facetbrowser.com/dl/facet-engine-148.0.7778.215-win-x64.zip',
     platform: 'win32',
     arch: 'x64'
+  },
+  {
+    // Upstream ships one macOS disk image per version, an arm64 binary, so
+    // only Apple Silicon Macs are supported (verified with the Mach-O header).
+    version: '148.0.7778.215',
+    file: 'ungoogled-chromium_148.0.7778.215-1.1_macos.dmg',
+    url: 'https://github.com/adryfish/fingerprint-chromium/releases/download/148.0.7778.215/ungoogled-chromium_148.0.7778.215-1.1_macos.dmg',
+    mirror: 'https://facetbrowser.com/dl/facet-engine-148.0.7778.215-mac.dmg',
+    platform: 'darwin',
+    arch: 'arm64'
   }
 ]
+
+function platformSupported(): boolean {
+  if (process.platform === 'win32') return process.arch === 'x64'
+  if (process.platform === 'darwin') return appleSilicon()
+  return false
+}
+
+// True on Apple Silicon even when the app itself runs under Rosetta.
+let siliconCache: boolean | null = null
+function appleSilicon(): boolean {
+  if (siliconCache !== null) return siliconCache
+  if (process.arch === 'arm64') return (siliconCache = true)
+  try {
+    siliconCache = execFileSync('sysctl', ['-n', 'hw.optional.arm64'], { encoding: 'utf8' }).trim() === '1'
+  } catch {
+    siliconCache = false
+  }
+  return siliconCache
+}
 
 class EngineManager extends EventEmitter {
   private downloading = false
@@ -65,13 +95,15 @@ class EngineManager extends EventEmitter {
   }
 
   latest(): EngineRelease | null {
-    return process.platform === 'win32' && process.arch === 'x64' ? KNOWN_RELEASES[KNOWN_RELEASES.length - 1] : null
+    if (!platformSupported()) return null
+    const mine = KNOWN_RELEASES.filter((r) => r.platform === process.platform)
+    return mine[mine.length - 1] || null
   }
 
   status(): EngineStatus {
     const inst = this.findInstalled()
     return {
-      supported: process.platform === 'win32' && process.arch === 'x64',
+      supported: platformSupported(),
       installed: !!inst,
       installedVersion: inst?.version || null,
       exePath: inst?.exe || null,
@@ -138,9 +170,10 @@ class EngineManager extends EventEmitter {
       this.progress = 0.96
       this.emitStatus()
       fs.rmSync(target, { recursive: true, force: true })
-      await extractZip(tmpZip, target)
+      if (rel.file.endsWith('.dmg')) extractDmg(tmpZip, target)
+      else await extractZip(tmpZip, target)
       fs.unlinkSync(tmpZip)
-      if (!findChrome(target)) throw new Error('Archive did not contain chrome.exe')
+      if (!findChrome(target)) throw new Error(process.platform === 'darwin' ? 'Disk image did not contain a Chromium app' : 'Archive did not contain chrome.exe')
       this.progress = 1
       return this.status()
     } catch (e) {
@@ -161,6 +194,7 @@ class EngineManager extends EventEmitter {
 
 function findChrome(dir: string): string | null {
   if (!fs.existsSync(dir)) return null
+  if (process.platform === 'darwin') return findMacApp(dir)
   const direct = path.join(dir, 'chrome.exe')
   if (fs.existsSync(direct)) return direct
   for (const sub of fs.readdirSync(dir)) {
@@ -178,6 +212,36 @@ function cmpVer(a: string, b: string): number {
     if (d) return d
   }
   return 0
+}
+
+// <engine>/<ver>/Chromium.app/Contents/MacOS/Chromium
+function findMacApp(dir: string): string | null {
+  for (const sub of fs.readdirSync(dir)) {
+    if (!sub.endsWith('.app')) continue
+    const macos = path.join(dir, sub, 'Contents', 'MacOS')
+    if (!fs.existsSync(macos)) continue
+    const bin = fs.readdirSync(macos).find((f) => fs.statSync(path.join(macos, f)).isFile())
+    if (bin) return path.join(macos, bin)
+  }
+  return null
+}
+
+// macOS: mount the disk image, copy the .app with ditto (keeps symlinks and
+// the bundle's signature), unmount. The file was written by us, so it carries
+// no quarantine flag, but clear it anyway in case something stamped it.
+function extractDmg(dmg: string, dest: string): void {
+  const mnt = fs.mkdtempSync(path.join(os.tmpdir(), 'facet-engine-'))
+  execFileSync('hdiutil', ['attach', '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mnt, dmg], { stdio: 'ignore' })
+  try {
+    const appName = fs.readdirSync(mnt).find((n) => n.endsWith('.app'))
+    if (!appName) throw new Error('Disk image did not contain a Chromium app')
+    fs.mkdirSync(dest, { recursive: true })
+    execFileSync('ditto', [path.join(mnt, appName), path.join(dest, appName)], { stdio: 'ignore' })
+  } finally {
+    try { execFileSync('hdiutil', ['detach', mnt, '-force'], { stdio: 'ignore' }) } catch { /* ignore */ }
+    try { fs.rmdirSync(mnt) } catch { /* ignore */ }
+  }
+  try { execFileSync('xattr', ['-dr', 'com.apple.quarantine', dest], { stdio: 'ignore' }) } catch { /* ignore */ }
 }
 
 // Windows ships tar.exe (bsdtar) which understands zip; avoids a native dependency.

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, nativeTheme } from 'electron'
+import { app, BrowserWindow, Menu, shell, nativeTheme } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { registerIpc } from './ipc'
@@ -80,6 +80,8 @@ if (!gotLock) {
   })
   app.whenReady().then(() => {
     nativeTheme.themeSource = 'dark'
+    // macOS needs an application menu for Cmd+C/V/A and Cmd+Q to work.
+    if (process.platform === 'darwin') Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]))
     store()
     registerIpc()
     createWindow()

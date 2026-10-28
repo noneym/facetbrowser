@@ -341,7 +341,7 @@ const dict = {
   'engine.installing': ['İndiriliyor', 'Downloading'],
   'engine.installed': ['Kurulu sürüm', 'Installed version'],
   'engine.notInstalled': ['Motor henüz indirilmedi (~190 MB).', 'Engine not downloaded yet (~190 MB).'],
-  'engine.unsupported': ['Bu platform için motor derlemesi henüz yok; kurulu Chrome kullanılır.', 'No engine build for this platform yet; the installed Chrome is used.'],
+  'engine.unsupported': ['Bu platform için motor derlemesi henüz yok (Windows x64 ve Apple Silicon Mac destekleniyor).', 'No engine build for this platform yet (Windows x64 and macOS on Apple Silicon are supported).'],
   'engine.remove': ['Motoru kaldır', 'Remove engine'],
   'engine.done': ['Motor kuruldu', 'Engine installed'],
   'engine.needed': ['Önce Ayarlar\'dan FacetBrowser Engine\'i indir.', 'Download the FacetBrowser Engine in Settings first.'],

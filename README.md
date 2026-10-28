@@ -13,10 +13,10 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 - Import / export profiles as JSON, import / export cookies (Playwright JSON, EditThisCookie, Netscape cookies.txt)
 - Start pages and unpacked extensions per profile; the tabs open when a profile was closed are reopened on the next launch (Settings > General to turn off)
 
-**FacetBrowser Engine** (Windows x64)
+**FacetBrowser Engine** (Windows x64, macOS on Apple Silicon)
 - The only browser the app uses: a Chromium build based on [fingerprint-chromium](https://github.com/adryfish/fingerprint-chromium) (BSD-3-Clause) that spoofs canvas, WebGL, audio, fonts, GPU, cores and the user agent at the C++ level and reports `navigator.webdriver` as false, so no JavaScript injection is needed
 - Downloaded on demand from Settings (about 190 MB); profiles then launch with `--fingerprint=<seed>`, `--fingerprint-platform`, `--fingerprint-brand=Chrome`, `--timezone` and `--accept-lang` derived from the profile
-- Downloaded on first run after sign-in; nothing launches without it
+- Downloaded on first run after sign-in; nothing launches without it. The upstream macOS build is arm64 only, so Intel Macs are not supported
 
 **Fingerprint**
 - Consistent generator: OS, user agent, platform, screen, pixel ratio, GPU (WebGL vendor / renderer), CPU cores, memory, touch points, languages, locale
@@ -56,7 +56,7 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 
 ## Development
 
-Requirements: Node 20+. The app downloads the FacetBrowser Engine on first run (Windows x64).
+Requirements: Node 20+. The app downloads the FacetBrowser Engine on first run (Windows x64, macOS on Apple Silicon).
 
 ```bash
 npm install
@@ -68,6 +68,7 @@ Build and package for Windows:
 ```bash
 npm run dist            # NSIS installer + portable exe in release/
 npm run dist:portable   # portable exe only
+npm run dist:mac        # dmg for Apple Silicon (run on macOS; ad-hoc signed, not notarized)
 ```
 
 Typecheck:
