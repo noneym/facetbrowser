@@ -340,7 +340,6 @@ const dict = {
   'ext.shareSkipped': ['({n} profil çalıştığı için atlandı)', '({n} skipped because running)'],
   'ext.err.source_running': ['Kaynak profil çalışıyor; önce kapat.', 'The source profile is running; close it first.'],
   'ext.err.no_extension_data': ['Kaynak profilde bu eklentinin verisi yok.', 'The source profile has no data for this extension.'],
-  'ext.err.not_shareable': ['Bu eklenti için oturum paylaşımı yok; yalnızca 1Password desteklenir.', 'Sign-in sharing is not available for this extension; only 1Password is supported.'],
   'ext.editorEmpty': ['Henüz eklenti kurulmadı. Eklentiler sayfasını aç.', 'No extensions installed yet. Open the Extensions page.'],
   'update.idle': ['Henüz denetlenmedi', 'Not checked yet'],
   'update.check': ['Güncellemeleri denetle', 'Check for updates'],

@@ -5,7 +5,6 @@ import { useApp } from '@/store/app'
 import { useT, useI18n } from '@/lib/i18n'
 import { toast, friendlyError } from '@/store/toast'
 import { Button, Input, Toggle, Modal, Select, Checkbox, cx } from '@/components/ui'
-import { SHAREABLE_EXTENSION_IDS } from '@shared/extensions'
 
 // Web Store extensions: paste an id or store URL, or pick from the curated
 // list. Installed ones load in every profile by default; switch that off to
@@ -113,7 +112,7 @@ export function ExtensionsPage(): JSX.Element {
                   <div className="w-44 shrink-0">
                     <Toggle checked={e.enabledForAll} onChange={(v) => setAll(e.id, v)} label={t('ext.allProfiles')} />
                   </div>
-                  {SHAREABLE_EXTENSION_IDS.includes(e.id) && <Button size="sm" icon={<ShareNetwork size={14} />} onClick={() => setShare(e)}>{t('ext.share')}</Button>}
+                  <Button size="sm" icon={<ShareNetwork size={14} />} onClick={() => setShare(e)}>{t('ext.share')}</Button>
                   <button className="focus-ring rounded p-1.5 text-fg-faint hover:text-fg" title={t('ext.openStore')} onClick={() => window.api.app.openExternal(`https://chromewebstore.google.com/detail/${e.id}`)}><ArrowSquareOut size={16} /></button>
                   <button className="focus-ring rounded p-1.5 text-fg-faint hover:text-danger" title={t('common.delete')} disabled={busy === e.id} onClick={() => remove(e.id)}><Trash size={16} /></button>
                 </li>

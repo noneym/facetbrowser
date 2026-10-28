@@ -30,7 +30,7 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 
 **Extensions**
 - Install Chrome Web Store extensions from the Extensions page (paste a store link or id, or pick from the featured list: 1Password, Bitwarden, Cookie-Editor, uBlock Origin Lite, MetaMask and more). The CRX is fetched from Google's update service, unpacked under the data folder and loaded in every profile (or only in profiles you pick). The publisher key is written into the manifest so the extension keeps its real Web Store id
-- Web Store extensions are pinned to the toolbar in every profile. Each profile has its own extension storage; for 1Password only, "Share sign-in" copies the extension's own store from one closed profile into others on request (nothing else is ever shared between profiles). The desktop 1Password app does not connect to the unsigned engine; the extension works standalone
+- Web Store extensions are pinned to the toolbar in every profile. Each profile has its own extension storage; "Share sign-in" copies one extension's own store (for example the 1Password sign-in) from a closed profile into other closed profiles on request; nothing else is ever shared between profiles. The desktop 1Password app does not connect to the unsigned engine; the extension works standalone
 
 **Account and cloud sync** (backed by [FacetBrowser-web](https://github.com/noneym/FacetBrowser-web))
 - Sign in or register inside the app; 14-day trial, lifetime Starter (15 profiles) and Unlimited licenses
