@@ -110,6 +110,15 @@ function assertProfileCapacity(adding: number): void {
 
 export function registerIpc(): void {
   const s = store()
+  // One-time: canvas noise is flagged as masking by pixelscan-style checks
+  // (verified: it is the only layer that trips it). Existing profiles move to
+  // the real canvas; WebGL, audio and font noise keep profiles distinct.
+  if (!s.settings.canvasNoiseMigrated) {
+    for (const p of s.profiles) {
+      if (p.fingerprint.canvas === 'noise') s.upsertProfile({ ...p, fingerprint: { ...p.fingerprint, canvas: 'real' } })
+    }
+    s.setSettings({ canvasNoiseMigrated: true })
+  }
   s.on('local-change', () => sync.touch())
   sync.on('status', (st) => send('cloud:status', st))
   sync.on('data', () => send('cloud:data', null))

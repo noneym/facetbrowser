@@ -1,6 +1,6 @@
 {
   "name": "facetbrowser",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "FacetBrowser - anti-detect multi-profile browser with proxy quality analysis",
   "homepage": "https://facetbrowser.com",
   "main": "./out/main/index.js",

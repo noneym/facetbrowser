@@ -53,7 +53,10 @@ export function buildUserAgent(os: OsFamily, version: string, rnd: () => number)
 export function generateFingerprint(opts: GenerateFingerprintOptions = {}): Fingerprint {
   const seed = opts.seed ?? Math.floor(Math.random() * 0xffffffff)
   const rnd = mulberry32(seed)
-  const os: OsFamily = opts.os ?? pick(rnd, ['windows', 'windows', 'windows', 'macos', 'linux'] as OsFamily[])
+  // Default to the host OS: a Windows host presenting as macOS is flagged as
+  // masking by pixelscan-style checks (fonts, GPU and rendering disagree).
+  const hostOs: OsFamily = process.platform === 'darwin' ? 'macos' : process.platform === 'linux' ? 'linux' : 'windows'
+  const os: OsFamily = opts.os ?? hostOs
   const browserVersion = opts.browserVersion ?? '131.0.0.0'
   const { ua, platform } = buildUserAgent(os, browserVersion, rnd)
 
@@ -81,7 +84,7 @@ export function generateFingerprint(opts: GenerateFingerprintOptions = {}): Fing
     deviceMemory: engineDeviceMemory(seed),
     maxTouchPoints: os === 'android' ? 5 : 0,
     webgl: { vendor, renderer, mode: 'noise' },
-    canvas: 'noise',
+    canvas: 'real', // noise is flagged as masking by pixelscan-style checks; WebGL/audio/font noise still separate profiles
     audio: 'noise',
     clientRects: 'noise',
     webrtc: 'altered',

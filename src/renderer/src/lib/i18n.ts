@@ -140,6 +140,7 @@ const dict = {
 
   'fp.regenerate': ['Yeni parmak izi üret', 'Generate new fingerprint'],
   'fp.os': ['İşletim sistemi', 'Operating system'],
+  'fp.osHint': ['Makinenin kendi sistemini seçmek en güvenlisi; farklı OS pixelscan tarzı testlerde "masking" olarak işaretlenir.', 'Safest is the machine\'s own OS; a different OS is flagged as "masking" by pixelscan-style checks.'],
   'fp.userAgent': ['User agent', 'User agent'],
   'fp.uaHint': ['Chrome sürümü başlatırken yüklü tarayıcıyla eşitlenir.', 'The Chrome version is synced to the installed browser at launch.'],
   'fp.screen': ['Ekran', 'Screen'],
@@ -165,6 +166,7 @@ const dict = {
   'fp.webglVendor': ['WebGL üretici', 'WebGL vendor'],
   'fp.webglRenderer': ['WebGL render', 'WebGL renderer'],
   'fp.canvas': ['Canvas', 'Canvas'],
+  'fp.canvasHint': ['Gürültü, pixelscan tarzı testlerde "masking" olarak yakalanıyor; gerçek bırak. Profiller WebGL, ses ve font gürültüsüyle zaten ayrışır.', 'Noise is flagged as "masking" by pixelscan-style checks; keep it real. WebGL, audio and font noise still keep profiles apart.'],
   'fp.audio': ['AudioContext', 'AudioContext'],
   'fp.rects': ['ClientRects', 'ClientRects'],
   'fp.webrtc': ['WebRTC', 'WebRTC'],

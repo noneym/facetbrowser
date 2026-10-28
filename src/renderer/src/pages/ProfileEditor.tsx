@@ -312,7 +312,7 @@ function FingerprintTab({ fp, patchFp, setFp }: { fp: Fingerprint; patchFp: (p: 
   return (
     <div className="flex flex-col gap-7">
       <div className="flex items-center justify-between gap-3">
-        <Field label={t('fp.os')} className="w-48">
+        <Field label={t('fp.os')} hint={t('fp.osHint')} className="w-48">
           <Select value={fp.os} onChange={(e) => regenerate(e.target.value as OsFamily)}>
             {(['windows', 'macos', 'linux'] as OsFamily[]).map((o) => <option key={o} value={o}>{osLabel(o)}</option>)}
           </Select>
@@ -371,7 +371,7 @@ function FingerprintTab({ fp, patchFp, setFp }: { fp: Fingerprint; patchFp: (p: 
 
       <Group title={t('fp.section.noise')}>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Row label={t('fp.canvas')}><Segmented size="sm" value={fp.canvas} onChange={(v) => patchFp({ canvas: v })} options={noiseOptions} /></Row>
+          <Row label={t('fp.canvas')} hint={t('fp.canvasHint')}><Segmented size="sm" value={fp.canvas} onChange={(v) => patchFp({ canvas: v })} options={noiseOptions} /></Row>
           <Row label={t('fp.webgl')}><Segmented size="sm" value={fp.webgl.mode} onChange={(v) => patchFp({ webgl: { ...fp.webgl, mode: v } })} options={noiseOptions} /></Row>
           <Row label={t('fp.audio')}><Segmented size="sm" value={fp.audio} onChange={(v) => patchFp({ audio: v })} options={noiseOptions.filter((o) => o.id !== 'off')} /></Row>
           <Row label={t('fp.rects')}><Segmented size="sm" value={fp.clientRects} onChange={(v) => patchFp({ clientRects: v })} options={noiseOptions.filter((o) => o.id !== 'off')} /></Row>
@@ -409,10 +409,10 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
+function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-line bg-bg px-3 py-2">
-      <span className="text-[13px]">{label}</span>
+      <span className="flex flex-col gap-0.5"><span className="text-[13px]">{label}</span>{hint && <span className="text-[11px] leading-snug text-fg-faint">{hint}</span>}</span>
       {children}
     </div>
   )

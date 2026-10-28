@@ -131,6 +131,7 @@ export interface Settings {
   profilesDir: string
   defaultStartUrl: string
   restoreTabs: boolean // reopen last session's tabs instead of the start page
+  canvasNoiseMigrated?: boolean // one-time switch of existing profiles from canvas noise to real
   getipintelContact: string
   abuseIpDbKey: string
   proxyCheckConcurrency: number
