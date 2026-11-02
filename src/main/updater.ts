@@ -16,7 +16,7 @@ class Updater extends EventEmitter {
   private log: (m: string) => void = () => {}
 
   private get supported(): boolean {
-    if (process.platform !== 'win32') return false
+    if (process.platform !== 'win32' && process.platform !== 'darwin') return false
     if (process.env['PORTABLE_EXECUTABLE_DIR']) return false
     return app.isPackaged || !!process.env['FACETBROWSER_UPDATE_URL']
   }

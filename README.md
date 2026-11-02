@@ -56,7 +56,7 @@ Website: [facetbrowser.com](https://facetbrowser.com)
 - Bulk checker page with CSV export and "add usable proxies to library"
 
 **Updates**
-- The installer build checks facetbrowser.com for new versions, downloads them in the background and installs on restart (Settings > About). The portable build links to the download page instead.
+- The Windows installer and the macOS app check facetbrowser.com for new versions, download them in the background and install on restart (Settings > About). The portable build links to the download page instead.
 
 ## Development
 
@@ -72,7 +72,7 @@ Build and package for Windows:
 ```bash
 npm run dist            # NSIS installer + portable exe in release/
 npm run dist:portable   # portable exe only
-npm run dist:mac        # dmg for Apple Silicon (run on macOS; ad-hoc signed, not notarized)
+npm run dist:mac        # dmg + zip for Apple Silicon (run on macOS; Developer ID signed and notarized when CSC_LINK/APPLE_* are set)
 ```
 
 Typecheck:

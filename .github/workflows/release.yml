@@ -86,7 +86,13 @@ jobs:
       FACET_ADMIN_TOKEN: ${{ secrets.FACET_ADMIN_TOKEN }}
       # Origin host: uploads go around Cloudflare, whose proxy caps request bodies at 100 MB.
       FACET_UPLOAD_ORIGIN: https://facetbrowser-web-facetbrowser.epyc-ana-ser-womi.dockerxo.dev
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # Developer ID signing + notarization. Without the secrets electron-builder
+      # skips signing and build/afterPack.js ad-hoc signs instead.
+      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -114,11 +120,23 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Package (dmg, Apple Silicon)
-        run: npx electron-builder --mac dmg --arm64 --publish never
+      - name: Package (dmg + zip, Apple Silicon), sign and notarize
+        run: |
+          set -o pipefail
+          if ! npx electron-builder --mac --arm64 --publish never 2>&1 | tee build.log; then
+            echo "::error title=electron-builder failed::$(grep -iE 'error|fail|notariz|identity|keychain|codesign' build.log | grep -v 'npm ERR' | tail -n 12 | tr '
+' ' ' | cut -c1-1500)"
+            exit 1
+          fi
+          grep -iE 'signing|notariz|identity|skipped' build.log | head -n 20 | while read -r l; do echo "::notice title=sign::$l"; done
 
-      - name: List artifacts
-        run: ls -la release/*.dmg
+      - name: Verify signature
+        run: |
+          ls -la release
+          for app in release/mac*/FacetBrowser.app; do
+            codesign --verify --deep --strict --verbose=2 "$app"
+            spctl --assess --type execute --verbose=2 "$app" || echo "::warning::$app is not notarized (no certificate secrets?)"
+          done
 
       - name: GitHub Release
         uses: softprops/action-gh-release@v2
@@ -127,11 +145,13 @@ jobs:
           name: FacetBrowser ${{ steps.ver.outputs.tag }}
           files: |
             release/FacetBrowser-*-mac-*.dmg
+            release/FacetBrowser-*-mac-*.zip
+            release/latest-mac.yml
 
       - name: Upload to facetbrowser.com
         if: ${{ env.FACET_ADMIN_TOKEN != '' }}
         run: |
-          for f in release/FacetBrowser-*-mac-*.dmg; do
+          for f in release/FacetBrowser-*-mac-*.dmg release/FacetBrowser-*-mac-*.zip release/latest-mac.yml; do
             name=$(basename "$f")
             echo "uploading $name"
             curl --fail -sS -T "$f" -H "x-admin-token: $FACET_ADMIN_TOKEN" "$FACET_UPLOAD_ORIGIN/api/admin/releases/$name"
