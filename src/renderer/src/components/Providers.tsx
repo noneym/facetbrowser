@@ -71,7 +71,7 @@ export function ProvidersDialog({ open, onClose }: { open: boolean; onClose: () 
                       <div className="text-[11.5px] text-fg-faint">{m?.name || acc.provider}</div>
                     </div>
                     <IconButton title={t('prov.balance')} onClick={() => loadBalance(acc)}><ArrowsClockwise size={15} /></IconButton>
-                    <Button size="sm" variant="primary" icon={<Lightning size={13} weight="fill" />} onClick={() => setGenFor(acc)}>{t('prov.generate')}</Button>
+                    <Button size="sm" variant="primary" icon={<Lightning size={13} weight="fill" />} onClick={() => setGenFor(acc)}>{t(m?.mode === 'import' ? 'prov.import' : 'prov.generate')}</Button>
                     <IconButton title={t('common.delete')} className="hover:text-bad" onClick={() => remove(acc)}><Trash size={15} /></IconButton>
                   </div>
                   <div className="mt-2 text-[12px]">
@@ -144,8 +144,15 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
   const [protocol, setProtocol] = useState<'http' | 'socks5'>(() => (localStorage.getItem('prov.protocol') === 'socks5' ? 'socks5' : 'http'))
   useEffect(() => { localStorage.setItem('prov.protocol', protocol) }, [protocol])
   const [busy, setBusy] = useState(false)
+  const [importMode, setImportMode] = useState(false)
   useEffect(() => {
     if (!acc) return
+    setImportMode(false)
+    window.api.providers.meta().then((m) => {
+      const imp = m.find((x) => x.id === acc.provider)?.mode === 'import'
+      setImportMode(imp)
+      if (imp) { setCountry(''); setCount(single ? 1 : 100) }
+    }).catch(() => undefined)
     setCountries([])
     window.api.providers.countries(acc.id).then(setCountries).catch(() => setCountries([]))
   }, [acc])
@@ -155,7 +162,7 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
     try {
       const r = await window.api.providers.generate(acc.id, { protocol, country: country || undefined, count: single ? 1 : count, sticky, ttlHours: ttl }, true)
       setProxies(await window.api.proxies.list())
-      toast.ok(t('prov.generated', { n: r.saved.length }))
+      toast.ok(t(importMode ? 'prov.imported' : 'prov.generated', { n: r.saved.length }))
       onGenerated?.(r.saved)
       onClose()
     } catch (e) {
@@ -165,9 +172,10 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
     }
   }
   return (
-    <Modal open={!!acc} onClose={onClose} title={`${t('prov.generate')}: ${acc?.label || ''}`} width={460}
-      footer={<><Button onClick={onClose}>{t('common.cancel')}</Button><Button variant="primary" loading={busy} onClick={run} icon={<Lightning size={14} weight="fill" />}>{t('prov.generate')}</Button></>}>
+    <Modal open={!!acc} onClose={onClose} title={`${t(importMode ? 'prov.import' : 'prov.generate')}: ${acc?.label || ''}`} width={460}
+      footer={<><Button onClick={onClose}>{t('common.cancel')}</Button><Button variant="primary" loading={busy} onClick={run} icon={<Lightning size={14} weight="fill" />}>{t(importMode ? 'prov.import' : 'prov.generate')}</Button></>}>
       <div className="flex flex-col gap-4">
+        {importMode && <p className="text-[12.5px] text-fg-muted">{t('prov.importHint')}</p>}
         <Field label={t('prov.protocol')}>
           <Segmented<'http' | 'socks5'> value={protocol} onChange={setProtocol} options={[{ id: 'http', label: 'HTTP' }, { id: 'socks5', label: 'SOCKS5' }]} />
         </Field>
@@ -182,8 +190,8 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
           )}
         </Field>
         {!single && <Field label={t('prov.count')}><Input type="number" min={1} max={100} value={count} onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} className="w-28 font-mono" /></Field>}
-        <Toggle checked={sticky} onChange={setSticky} label={sticky ? t('prov.sticky') : t('prov.rotating')} />
-        {sticky && <Field label={t('prov.ttl')} hint={acc?.provider === '2captcha' ? '2Captcha: max 2 h' : 'GonzoProxy: max 168 h'}><Input type="number" min={1} max={168} value={ttl} onChange={(e) => setTtl(Math.max(1, Math.min(168, Number(e.target.value) || 24)))} className={cx('w-28 font-mono')} /></Field>}
+        {!importMode && <Toggle checked={sticky} onChange={setSticky} label={sticky ? t('prov.sticky') : t('prov.rotating')} />}
+        {!importMode && sticky && <Field label={t('prov.ttl')} hint={acc?.provider === '2captcha' ? '2Captcha: max 2 h' : 'GonzoProxy: max 168 h'}><Input type="number" min={1} max={168} value={ttl} onChange={(e) => setTtl(Math.max(1, Math.min(168, Number(e.target.value) || 24)))} className={cx('w-28 font-mono')} /></Field>}
       </div>
     </Modal>
   )

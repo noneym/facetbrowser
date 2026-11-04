@@ -105,7 +105,7 @@ const api = {
     onData: (cb: Listener<null>) => on('cloud:data', cb)
   },
   providers: {
-    meta: (): Promise<Array<{ id: string; name: string; canGenerate: boolean; fields: Array<{ key: string; label: string; secret?: boolean; hint?: string; optional?: boolean }> }>> => ipcRenderer.invoke('providers:meta'),
+    meta: (): Promise<Array<{ id: string; name: string; canGenerate: boolean; mode: 'generate' | 'import'; fields: Array<{ key: string; label: string; secret?: boolean; hint?: string; optional?: boolean }> }>> => ipcRenderer.invoke('providers:meta'),
     accounts: (): Promise<ProviderAccount[]> => ipcRenderer.invoke('providers:accounts'),
     save: (acc: Omit<ProviderAccount, 'createdAt' | 'updatedAt'>): Promise<ProviderAccount[]> => ipcRenderer.invoke('providers:save', acc),
     delete: (id: string): Promise<ProviderAccount[]> => ipcRenderer.invoke('providers:delete', id),

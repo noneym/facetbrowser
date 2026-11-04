@@ -424,13 +424,23 @@ export function registerIpc(): void {
   ipcMain.handle('providers:countries', async (_e, id: string) => { const acc = await accountById(id); return providers[acc.provider].countries(acc) })
   ipcMain.handle('providers:generate', async (_e, id: string, opts: ProviderGenerateOptions, save: boolean) => {
     const acc = await accountById(id)
-    const configs = await providers[acc.provider].generate(acc, opts)
+    const adapter = providers[acc.provider]
+    const sameProxy = (a: ProxyConfig, b: ProxyConfig): boolean => a.host === b.host && a.port === b.port && a.protocol === b.protocol && (a.username || '') === (b.username || '')
+    const existing = (c: ProxyConfig): SavedProxy | undefined => s.proxies.find((p) => sameProxy(p, c))
+    let found = await adapter.generate(acc, opts)
+    // Imported proxies are owned ones: hand out those not in the library first.
+    if (adapter.mode === 'import') found = [...found.filter((c) => !existing(c)), ...found.filter((c) => existing(c))].slice(0, Math.max(1, opts.count))
+    const configs: ProxyConfig[] = found.map(({ protocol, host, port, username, password }) => ({ protocol, host, port, ...(username ? { username } : {}), ...(password ? { password } : {}) }))
     if (!save) return { configs, saved: [] as SavedProxy[] }
     const now = Date.now()
     const saved: SavedProxy[] = []
-    for (const c of configs) {
-      const p = s.upsertProxy({ ...c, id: uid('x'), name: `${providers[acc.provider].name}${opts.country ? ' ' + opts.country.toUpperCase() : ''}`, tags: [acc.provider, ...(opts.country ? [opts.country.toUpperCase()] : [])], createdAt: now, updatedAt: now })
-      saved.push(p)
+    for (const [i, c] of configs.entries()) {
+      const meta = found[i]
+      const prev = existing(c)
+      if (prev) { saved.push(prev.password === c.password ? prev : s.upsertProxy({ ...prev, password: c.password, updatedAt: now })); continue }
+      const name = meta.name || `${adapter.name}${opts.country ? ' ' + opts.country.toUpperCase() : ''}`
+      const tags = meta.tags || [acc.provider, ...(opts.country ? [opts.country.toUpperCase()] : [])]
+      saved.push(s.upsertProxy({ ...c, id: uid('x'), name, tags, createdAt: now, updatedAt: now }))
     }
     return { configs, saved }
   })

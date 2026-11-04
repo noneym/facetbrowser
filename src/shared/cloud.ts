@@ -76,7 +76,7 @@ export interface CloudStatus {
   offlineGraceUntil: number | null
 }
 
-export type ProviderId = 'gonzoproxy' | '2captcha'
+export type ProviderId = 'gonzoproxy' | '2captcha' | 'proxycheap'
 
 export interface ProviderAccount {
   id: string

@@ -2,6 +2,10 @@ import type { ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerat
 import type { ProxyConfig } from '@shared/types'
 import { gonzoproxy } from './gonzoproxy'
 import { twocaptcha } from './twocaptcha'
+import { proxycheap } from './proxycheap'
+
+// A proxy an adapter hands back; name and tags override the defaults.
+export type ProviderProxy = ProxyConfig & { name?: string; tags?: string[] }
 
 export interface ProviderAdapter {
   id: ProviderId
@@ -10,12 +14,15 @@ export interface ProviderAdapter {
   fields: Array<{ key: string; label: string; secret?: boolean; hint?: string; optional?: boolean }>
   balance(acc: ProviderAccount): Promise<ProviderBalance>
   countries(acc: ProviderAccount): Promise<ProviderCountry[]>
-  generate(acc: ProviderAccount, opts: ProviderGenerateOptions): Promise<ProxyConfig[]>
+  generate(acc: ProviderAccount, opts: ProviderGenerateOptions): Promise<ProviderProxy[]>
   canGenerate: boolean
+  // 'generate' builds gateway logins on demand; 'import' lists proxies the
+  // account already bought (all matches; the caller applies the count).
+  mode?: 'generate' | 'import'
 }
 
-export const providers: Record<ProviderId, ProviderAdapter> = { gonzoproxy, '2captcha': twocaptcha }
+export const providers: Record<ProviderId, ProviderAdapter> = { gonzoproxy, '2captcha': twocaptcha, proxycheap }
 
-export function providerMeta(): Array<Pick<ProviderAdapter, 'id' | 'name' | 'fields' | 'canGenerate'>> {
-  return Object.values(providers).map((p) => ({ id: p.id, name: p.name, fields: p.fields, canGenerate: p.canGenerate }))
+export function providerMeta(): Array<Pick<ProviderAdapter, 'id' | 'name' | 'fields' | 'canGenerate'> & { mode: 'generate' | 'import' }> {
+  return Object.values(providers).map((p) => ({ id: p.id, name: p.name, fields: p.fields, canGenerate: p.canGenerate, mode: p.mode || 'generate' }))
 }
