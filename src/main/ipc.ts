@@ -278,14 +278,18 @@ export function registerIpc(): void {
   // force: the profile is open on another device and the user chose "Force
   // stop"; wait for that device to close it and upload its session first.
   ipcMain.handle('browser:launch', async (_e, id: string, force?: boolean) => {
-    const p = s.getProfile(id)
-    if (!p) throw new Error('Profile not found')
+    if (!s.getProfile(id)) throw new Error('Profile not found')
     const gate = sync.licenseGate()
     if (!gate.ok) throw new Error(gate.reason)
     if (!launcher.isRunning(id)) {
       if (force) await sync.takeOver(id)
       else await sync.claim(id)
+      // Pull the profile as the last device left it (its open tabs, edits
+      // made on the phone) instead of waiting for the next periodic sync.
+      await sync.runNow()
     }
+    const p = s.getProfile(id)
+    if (!p) throw new Error('Profile not found')
     await sync.pullCookiesIfNewer(id).catch(() => {})
     extensions.applyShares(p)
     try {

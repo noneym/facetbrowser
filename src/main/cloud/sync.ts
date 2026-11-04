@@ -43,7 +43,9 @@ class SyncEngine extends EventEmitter {
     // full read from disk once it has closed (covers tabs closed earlier).
     // The running lock is released only after that upload, so a device that
     // takes the profile over always pulls the final session.
-    launcher.on('closed', (id: string) => this.uploadCookies(id).catch(() => {}).then(() => this.releaseLock(id)))
+    // The profile record goes up too (ipc.ts has just stored its last tabs),
+    // so a device that takes the profile over opens the same tabs.
+    launcher.on('closed', (id: string) => this.uploadCookies(id).catch(() => {}).then(() => this.runNow()).then(() => this.releaseLock(id)))
     launcher.on('beforeStop', (id: string) => this.uploadCookies(id).catch(() => {}))
     this.run().catch(() => {})
   }
@@ -90,6 +92,13 @@ class SyncEngine extends EventEmitter {
     if (!store().cloud.session) return
     if (this.debounce) clearTimeout(this.debounce)
     this.debounce = setTimeout(() => this.run().catch(() => {}), 2500)
+  }
+
+  // A sync that surely includes changes made just now: waits for one that is
+  // already in flight, then runs again.
+  async runNow(): Promise<void> {
+    for (let i = 0; this.running && i < 100; i++) await new Promise((r) => setTimeout(r, 200))
+    await this.run().catch(() => {})
   }
 
   async run(): Promise<void> {
