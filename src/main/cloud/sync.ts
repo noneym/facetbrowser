@@ -31,6 +31,8 @@ class SyncEngine extends EventEmitter {
   private online = true
   private lastError: string | null = null
   private cookieBusy = new Set<string>()
+  // Set by ipc.ts (it owns profile defaults and the fingerprint generator).
+  completeProfile: ((p: Profile) => Profile) | null = null
 
   start(): void {
     this.stop()
@@ -99,7 +101,7 @@ class SyncEngine extends EventEmitter {
       const since = s.cloud.lastSyncAt
       const changes = this.collectLocalChanges(since)
       const res = await cloud.sync(since, changes)
-      this.applyRemote(res.changes)
+      this.applyRemote(res.changes, res.now)
       for (const r of res.rejected) {
         if (r.reason === 'profile_limit') this.lastError = 'profile_limit'
       }
@@ -132,7 +134,7 @@ class SyncEngine extends EventEmitter {
     return out
   }
 
-  private applyRemote(changes: Record<SyncCollection, SyncRecord[]>): void {
+  private applyRemote(changes: Record<SyncCollection, SyncRecord[]>, serverNow: number): void {
     const s = store()
     let changed = false
     for (const rec of changes.profiles) {
@@ -143,7 +145,13 @@ class SyncEngine extends EventEmitter {
       }
       if (!local || local.updatedAt < rec.updatedAt) {
         const remote = rec.data as Profile
-        s.upsertProfile({ ...remote, updatedAt: rec.updatedAt, cookieCount: local?.cookieCount }, { silent: true, keepUpdatedAt: true })
+        if (!remote.fingerprint && this.completeProfile) {
+          // Made on the phone (Facet Lite), which has no fingerprint engine:
+          // fill in the desktop fields once and send the full profile back.
+          s.upsertProfile({ ...this.completeProfile(remote), updatedAt: Math.max(Date.now(), serverNow) + 1 }, { keepUpdatedAt: true })
+        } else {
+          s.upsertProfile({ ...remote, updatedAt: rec.updatedAt, cookieCount: local?.cookieCount }, { silent: true, keepUpdatedAt: true })
+        }
         changed = true
       }
     }

@@ -103,6 +103,12 @@ export function newProfile(partial: Partial<Profile> = {}): Profile {
   }
 }
 
+// Profiles created in Facet Lite arrive without the desktop-only fields.
+sync.completeProfile = (p) => {
+  const base = newProfile()
+  return { ...base, ...p, proxy: p.proxy || base.proxy, fingerprint: base.fingerprint, tags: p.tags || [], startUrls: p.startUrls || [], extensions: p.extensions || [], launchCount: p.launchCount || 0 }
+}
+
 function assertProfileCapacity(adding: number): void {
   const limit = sync.profileLimit()
   if (limit !== null && store().profiles.length + adding > limit) throw new Error('profile_limit')
