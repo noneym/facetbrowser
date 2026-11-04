@@ -15,6 +15,8 @@ interface Running {
   tabs: Map<Page, string> // current URL per open tab
   tabSnapshot: string[] // last known tab list, kept across the shutdown burst of page closes
   tabTimer: NodeJS.Timeout | null
+  ready?: boolean // start tabs are open; from here on, no tabs left means the user closed the browser
+  emptyTimer?: NodeJS.Timeout | null
 }
 
 const MAX_TABS = 50
@@ -248,6 +250,18 @@ class Launcher extends EventEmitter {
             entry.tabTimer = null
             if (this.running.get(profile.id) === entry) snapshot()
           }, 1500)
+          // Closing the last window does not end Chromium while the debugging
+          // pipe is attached: it keeps running with no window, and the profile
+          // would look open forever. With no tab left, stop it ourselves; that
+          // runs the normal close (session upload, last tabs, lock release).
+          // This fires before the tab-snapshot timer, so the tabs are kept.
+          if (entry.emptyTimer) clearTimeout(entry.emptyTimer)
+          entry.emptyTimer = setTimeout(() => {
+            entry.emptyTimer = null
+            if (entry.ready && entry.state === 'running' && this.running.get(profile.id) === entry && !context.pages().length) {
+              this.stop(profile.id).catch(() => {})
+            }
+          }, 500)
         })
       }
       context.pages().forEach(track)
@@ -266,6 +280,7 @@ class Launcher extends EventEmitter {
         const page = i === 0 && pages[0] ? pages[0] : await context.newPage()
         page.goto(urls[i]).catch(() => {})
       }
+      entry.ready = true
       this.emitStatus()
     } catch (e) {
       await bridge?.close()
@@ -280,6 +295,7 @@ class Launcher extends EventEmitter {
     if (!r) return
     this.running.delete(profileId)
     if (r.tabTimer) clearTimeout(r.tabTimer)
+    if (r.emptyTimer) clearTimeout(r.emptyTimer)
     await r.bridge?.close().catch(() => {})
     this.emit('closed', profileId, r.tabSnapshot)
     this.emitStatus()
