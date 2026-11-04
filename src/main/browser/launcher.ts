@@ -254,6 +254,8 @@ class Launcher extends EventEmitter {
       context.on('page', track)
 
       if (!context.pages().length) await context.waitForEvent('page', { timeout: 5000 }).catch(() => null)
+      await restoreDownloads(context)
+      await ensureSearchEngine(context, dir)
 
       // Where we left off beats the start page, when the setting allows it.
       const previous = settings.restoreTabs !== false ? (profile.lastTabs || []).filter((u) => originOf(u)) : []
@@ -409,6 +411,75 @@ class Launcher extends EventEmitter {
     const from = this.userDataDir(src, settings)
     const to = this.userDataDir(dst, settings)
     if (fs.existsSync(from)) fs.cpSync(from, to, { recursive: true, filter: (p) => !/(Singleton|lockfile|\.lock$|Crashpad|GPUCache|Code Cache)/i.test(p) })
+  }
+}
+
+// Playwright routes every download into its own temp artifacts folder under a
+// GUID name (deleted when the context closes), so files never reached the
+// Downloads folder. Hand downloads back to Chromium: its own folder, real file
+// names, the save-as prompt when the user turned it on.
+async function restoreDownloads(ctx: BrowserContext): Promise<void> {
+  const page = safePageList(ctx)[0]
+  if (!page) return
+  try {
+    const cdp = await ctx.newCDPSession(page)
+    await cdp.send('Browser.setDownloadBehavior', { behavior: 'default' })
+    await cdp.detach().catch(() => {})
+  } catch {
+    /* downloads stay with Playwright; the profile still works */
+  }
+}
+
+// The engine is ungoogled-chromium, whose default search engine is "No
+// Search" (http://{searchTerms}): anything typed in the address bar went to
+// http://<text>. The search pref is MAC-protected, so writing it into
+// Preferences is discarded; instead Chromium's own settings handler adds
+// Google and makes it the default. Runs once per profile (marker file), and
+// only while the default is still No Search, so a user's own choice stays.
+const SEARCH_MARKER = 'facet-search-engine'
+
+// Kept as a string: it runs inside chrome://settings, where the WebUI module
+// and chrome.send exist, and must not be touched by the bundler.
+const SET_GOOGLE_DEFAULT = `(async () => {
+  const cr = await import('chrome://resources/js/cr.js')
+  const list = async () => {
+    const l = await cr.sendWithPromise('getSearchEnginesList')
+    return [...l.defaults, ...l.actives, ...l.others]
+  }
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+  const current = (await list()).find((e) => e.default)
+  if (current && current.keyword !== 'nosearch') return true
+  let google = (await list()).find((e) => e.keyword === 'google.com')
+  if (!google) {
+    chrome.send('searchEngineEditStarted', [0])
+    chrome.send('searchEngineEditCompleted', ['Google', 'google.com', 'https://www.google.com/search?q=%s', 'https://www.google.com/complete/search?client=chrome&q=%s'])
+    for (let i = 0; i < 20 && !google; i++) {
+      await wait(100)
+      google = (await list()).find((e) => e.keyword === 'google.com')
+    }
+  }
+  if (!google) return false
+  chrome.send('setDefaultSearchEngine', [google.id, 0, false])
+  for (let i = 0; i < 20; i++) {
+    await wait(100)
+    if ((await list()).find((e) => e.default)?.keyword === 'google.com') return true
+  }
+  return false
+})()`
+
+async function ensureSearchEngine(ctx: BrowserContext, userDataDir: string): Promise<void> {
+  const marker = path.join(userDataDir, SEARCH_MARKER)
+  if (fs.existsSync(marker)) return
+  let page: Page | null = null
+  try {
+    page = await ctx.newPage()
+    await page.goto('chrome://settings/searchEngines', { timeout: 8000 })
+    const ok = await page.evaluate(SET_GOOGLE_DEFAULT)
+    if (ok) fs.writeFileSync(marker, '1', 'utf8')
+  } catch {
+    /* tried again at the next launch */
+  } finally {
+    await page?.close().catch(() => {})
   }
 }
 
