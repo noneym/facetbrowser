@@ -81,6 +81,10 @@ export const useApp = create<AppState>((set, get) => ({
       set({ update })
       if (update.state === 'ready' && was !== 'ready') toast.info(t('update.readyToast', { v: update.version || '' }))
     })
+    window.api.browser.onRemoteStopped((id) => {
+      const p = get().profiles.find((x) => x.id === id)
+      toast.info(t('profiles.remoteStopped', { name: p?.name || id }))
+    })
     window.api.browser.onStatus((running) => {
       set({ running })
       get().refreshProfiles()

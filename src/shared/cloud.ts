@@ -49,6 +49,15 @@ export interface CookieBlobInfo {
   size: number
 }
 
+// A profile open on one of the account's devices.
+export interface RunningLock {
+  profileId: string
+  deviceId: string
+  deviceName: string
+  startedAt: number
+  beatAt: number
+}
+
 export interface CloudSession {
   apiBase: string
   deviceId: string

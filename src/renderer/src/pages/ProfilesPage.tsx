@@ -7,6 +7,7 @@ import { toast, errMsg, friendlyError } from '@/store/toast'
 import { timeAgo, osLabel, proxyShort } from '@/lib/format'
 import { Button, Checkbox, EmptyState, IconButton, Input, Menu, Modal, Badge, Toggle, Select, cx } from '@/components/ui'
 import { GradeBadge } from '@/components/GradeBadge'
+import { launchProfile } from '@/components/Takeover'
 
 type Filter = 'all' | 'running' | 'favorites'
 
@@ -55,10 +56,7 @@ export function ProfilesPage(): JSX.Element {
   const launch = async (p: Profile): Promise<void> => {
     setBusyFor(p.id, true)
     try {
-      await window.api.browser.launch(p.id)
-      toast.ok(t('profiles.launched', { name: p.name }))
-    } catch (e) {
-      toast.err(t('profiles.launchFailed', { err: friendlyError(e) }))
+      await launchProfile(p)
     } finally {
       setBusyFor(p.id, false)
     }

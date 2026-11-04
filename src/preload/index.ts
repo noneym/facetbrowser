@@ -46,10 +46,11 @@ const api = {
   },
   browser: {
     list: (): Promise<RunningProfile[]> => ipcRenderer.invoke('browser:list'),
-    launch: (id: string): Promise<Profile> => ipcRenderer.invoke('browser:launch', id),
+    launch: (id: string, force?: boolean): Promise<Profile> => ipcRenderer.invoke('browser:launch', id, force),
     stop: (id: string): Promise<void> => ipcRenderer.invoke('browser:stop', id),
     stopAll: (): Promise<void> => ipcRenderer.invoke('browser:stopAll'),
-    onStatus: (cb: Listener<RunningProfile[]>) => on('browser:status', cb)
+    onStatus: (cb: Listener<RunningProfile[]>) => on('browser:status', cb),
+    onRemoteStopped: (cb: Listener<string>) => on('browser:remoteStopped', cb)
   },
   cookies: {
     export: (id: string): Promise<CookieRecord[]> => ipcRenderer.invoke('cookies:export', id),

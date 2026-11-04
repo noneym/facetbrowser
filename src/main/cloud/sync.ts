@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events'
-import type { CloudStatus, SyncCollection, SyncRecord } from '@shared/cloud'
+import type { CloudStatus, RunningLock, SyncCollection, SyncRecord } from '@shared/cloud'
 import type { Group, Profile, SavedProxy } from '@shared/types'
 import { store } from '../store'
 import { cloud, CloudError } from './client'
@@ -8,6 +8,15 @@ import { launcher } from '../browser/launcher'
 const OFFLINE_GRACE_MS = 7 * 86400000
 const PERIOD_MS = 60000
 const COOKIE_PERIOD_MS = 45000
+const BEAT_MS = 10000
+const TAKEOVER_MS = 90000 // how long "Force stop" waits for the other device
+
+// Thrown when a profile is open on another device of the account.
+export class RunningElsewhere extends Error {
+  constructor(public deviceName: string) {
+    super(`running_elsewhere:${deviceName}`)
+  }
+}
 
 // Keeps local store and the account in step. Last-write-wins per record on
 // `updatedAt`; deletions travel as tombstones. The session jar (cookies plus
@@ -16,6 +25,7 @@ const COOKIE_PERIOD_MS = 45000
 class SyncEngine extends EventEmitter {
   private timer: NodeJS.Timeout | null = null
   private cookieTimer: NodeJS.Timeout | null = null
+  private beatTimer: NodeJS.Timeout | null = null
   private debounce: NodeJS.Timeout | null = null
   private running = false
   private online = true
@@ -26,9 +36,12 @@ class SyncEngine extends EventEmitter {
     this.stop()
     this.timer = setInterval(() => this.run().catch(() => {}), PERIOD_MS)
     this.cookieTimer = setInterval(() => this.uploadRunningCookies().catch(() => {}), COOKIE_PERIOD_MS)
+    this.beatTimer = setInterval(() => this.heartbeat().catch(() => {}), BEAT_MS)
     // On stop: a quick read from the live browser first (beforeStop), then a
     // full read from disk once it has closed (covers tabs closed earlier).
-    launcher.on('closed', (id: string) => this.uploadCookies(id).catch(() => {}))
+    // The running lock is released only after that upload, so a device that
+    // takes the profile over always pulls the final session.
+    launcher.on('closed', (id: string) => this.uploadCookies(id).catch(() => {}).then(() => this.releaseLock(id)))
     launcher.on('beforeStop', (id: string) => this.uploadCookies(id).catch(() => {}))
     this.run().catch(() => {})
   }
@@ -36,8 +49,10 @@ class SyncEngine extends EventEmitter {
   stop(): void {
     if (this.timer) clearInterval(this.timer)
     if (this.cookieTimer) clearInterval(this.cookieTimer)
+    if (this.beatTimer) clearInterval(this.beatTimer)
     this.timer = null
     this.cookieTimer = null
+    this.beatTimer = null
   }
 
   status(): CloudStatus {
@@ -155,6 +170,56 @@ class SyncEngine extends EventEmitter {
       }
     }
     if (changed) this.emit('data')
+  }
+
+  // ---- running lock ----------------------------------------------------
+  // One device at a time per profile. Without the server (offline, older
+  // server) launching is never blocked.
+  async claim(profileId: string): Promise<void> {
+    if (!store().cloud.session) return
+    try {
+      await cloud.runningClaim(profileId)
+    } catch (e) {
+      const err = e as CloudError
+      if (err.status === 409) throw new RunningElsewhere((err.data as { lock?: RunningLock })?.lock?.deviceName || '')
+    }
+  }
+
+  // "Force stop": ask the holder to close the profile, then wait until it has
+  // uploaded the session and released the lock (or its lock expired).
+  async takeOver(profileId: string): Promise<void> {
+    if (!store().cloud.session) return
+    const until = Date.now() + TAKEOVER_MS
+    let force = true
+    while (Date.now() < until) {
+      try {
+        await cloud.runningClaim(profileId, force)
+        return
+      } catch (e) {
+        const err = e as CloudError
+        if (err.status !== 409) return
+      }
+      force = false
+      await new Promise((r) => setTimeout(r, 2000))
+    }
+    throw new Error('takeover_timeout')
+  }
+
+  private async heartbeat(): Promise<void> {
+    if (!store().cloud.session) return
+    const ids = launcher.list().filter((r) => r.state === 'running' || r.state === 'starting').map((r) => r.profileId)
+    if (!ids.length) return
+    const { stop } = await cloud.runningHeartbeat(ids)
+    for (const id of stop) {
+      if (!launcher.isRunning(id)) continue
+      this.emit('remoteStop', id)
+      await launcher.stop(id).catch(() => {})
+    }
+  }
+
+  async releaseLock(profileId: string): Promise<void> {
+    if (!store().cloud.session) return
+    await cloud.runningRelease(profileId).catch(() => {})
   }
 
   // ---- cookies ---------------------------------------------------------

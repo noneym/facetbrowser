@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useApp } from '@/store/app'
 import { Sidebar } from '@/components/Sidebar'
 import { Toasts } from '@/components/Toasts'
+import { TakeoverDialog } from '@/components/Takeover'
 import { ProfilesPage } from '@/pages/ProfilesPage'
 import { ProfileEditor } from '@/pages/ProfileEditor'
 import { ProxiesPage } from '@/pages/ProxiesPage'
@@ -66,6 +67,7 @@ export default function App(): JSX.Element {
       </main>
       <ProfileEditor />
       <Toasts />
+      <TakeoverDialog />
     </div>
   )
 }

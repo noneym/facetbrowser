@@ -268,17 +268,29 @@ export function registerIpc(): void {
     send('cloud:data', null)
   })
   ipcMain.handle('browser:list', () => launcher.list())
-  ipcMain.handle('browser:launch', async (_e, id: string) => {
+  sync.on('remoteStop', (id: string) => send('browser:remoteStopped', id))
+  // force: the profile is open on another device and the user chose "Force
+  // stop"; wait for that device to close it and upload its session first.
+  ipcMain.handle('browser:launch', async (_e, id: string, force?: boolean) => {
     const p = s.getProfile(id)
     if (!p) throw new Error('Profile not found')
     const gate = sync.licenseGate()
     if (!gate.ok) throw new Error(gate.reason)
+    if (!launcher.isRunning(id)) {
+      if (force) await sync.takeOver(id)
+      else await sync.claim(id)
+    }
     await sync.pullCookiesIfNewer(id).catch(() => {})
     extensions.applyShares(p)
-    const { config, info: known } = resolveProxy(p)
-    const info = await freshProxyInfo(p, config, known)
-    applyProxyLocale(p, info)
-    await launcher.launch({ profile: p, proxy: config, proxyInfo: info, settings: s.settings, extensionDirs: extensions.dirsFor(p) })
+    try {
+      const { config, info: known } = resolveProxy(p)
+      const info = await freshProxyInfo(p, config, known)
+      applyProxyLocale(p, info)
+      await launcher.launch({ profile: p, proxy: config, proxyInfo: info, settings: s.settings, extensionDirs: extensions.dirsFor(p) })
+    } catch (e) {
+      if (!launcher.isRunning(id)) await sync.releaseLock(id)
+      throw e
+    }
     p.launchCount = (p.launchCount || 0) + 1
     p.lastLaunchedAt = Date.now()
     s.upsertProfile(p)

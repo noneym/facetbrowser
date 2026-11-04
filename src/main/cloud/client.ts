@@ -1,10 +1,10 @@
 import os from 'os'
-import type { AuthTokens, CloudSession, CookieBlobInfo, LicenseInfo, ProviderAccount, PublicUser, SyncCollection, SyncPushResponse, SyncRecord } from '@shared/cloud'
+import type { AuthTokens, CloudSession, CookieBlobInfo, LicenseInfo, ProviderAccount, PublicUser, RunningLock, SyncCollection, SyncPushResponse, SyncRecord } from '@shared/cloud'
 import type { CookieRecord, StorageOrigin } from '@shared/types'
 import { store, uid } from '../store'
 
 export class CloudError extends Error {
-  constructor(public status: number, public code: string) {
+  constructor(public status: number, public code: string, public data?: unknown) {
     super(code)
   }
 }
@@ -63,7 +63,7 @@ async function request<T>(path: string, opts: { method?: string; body?: unknown;
   try { data = text ? JSON.parse(text) : null } catch { data = text }
   if (!res.ok) {
     const d = data as { error?: string } | null
-    throw new CloudError(res.status, d?.error || `http_${res.status}`)
+    throw new CloudError(res.status, d?.error || `http_${res.status}`, data)
   }
   return data as T
 }
@@ -126,6 +126,11 @@ export const cloud = {
   cookieGet: (profileId: string): Promise<{ profileId: string; updatedAt: number; cookies: CookieRecord[]; storage?: StorageOrigin[] }> => request(`/sync/cookies/${encodeURIComponent(profileId)}`, { timeoutMs: 60000 }),
   cookiePut: (profileId: string, updatedAt: number, cookies: CookieRecord[], storage: StorageOrigin[]): Promise<{ ok: true; skipped: boolean; serverUpdatedAt: number }> => request(`/sync/cookies/${encodeURIComponent(profileId)}`, { method: 'PUT', body: { updatedAt, cookies, storage }, timeoutMs: 60000 }),
   cookieDelete: (profileId: string): Promise<void> => request(`/sync/cookies/${encodeURIComponent(profileId)}`, { method: 'DELETE' }),
+
+  runningList: (): Promise<RunningLock[]> => request('/sync/running'),
+  runningClaim: (profileId: string, force = false): Promise<{ ok: true; lock: RunningLock }> => request(`/sync/running/${encodeURIComponent(profileId)}/claim`, { body: { force } }),
+  runningHeartbeat: (profileIds: string[]): Promise<{ stop: string[] }> => request('/sync/running/heartbeat', { body: { profileIds } }),
+  runningRelease: (profileId: string): Promise<void> => request(`/sync/running/${encodeURIComponent(profileId)}`, { method: 'DELETE' }),
 
   providerAccounts: (): Promise<ProviderAccount[]> => request('/proxy-accounts'),
   providerAccountSave: (acc: Omit<ProviderAccount, 'createdAt' | 'updatedAt'>): Promise<{ id: string }> => request(`/proxy-accounts/${acc.id || 'new'}`, { method: 'PUT', body: { provider: acc.provider, label: acc.label, credentials: acc.credentials } }),

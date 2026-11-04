@@ -9,6 +9,7 @@ import type { ProviderAccount } from '@shared/cloud'
 import { proxyShort, proxyLine, TIMEZONES, LOCALE_OPTIONS, osLabel } from '@/lib/format'
 import { Button, Drawer, Field, Input, Select, Tabs, TagInput, Textarea, Toggle, Segmented, Modal, Menu, Checkbox, cx } from '@/components/ui'
 import { GradeBadge } from '@/components/GradeBadge'
+import { launchProfile } from '@/components/Takeover'
 import { ProxyDetail } from './ProxiesPage'
 
 type Tab = 'general' | 'proxy' | 'fingerprint' | 'cookies' | 'advanced'
@@ -43,12 +44,7 @@ export function ProfileEditor(): JSX.Element {
       await refreshProfiles()
       toast.ok(t('editor.saved'))
       if (launch) {
-        try {
-          await window.api.browser.launch(saved.id)
-          toast.ok(t('profiles.launched', { name: saved.name }))
-        } catch (e) {
-          toast.err(t('profiles.launchFailed', { err: friendlyError(e) }))
-        }
+        await launchProfile(saved)
       }
       closeEditor()
       return saved
