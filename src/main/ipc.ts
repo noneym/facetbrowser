@@ -439,7 +439,7 @@ export function registerIpc(): void {
     const existing = (c: ProxyConfig): SavedProxy | undefined => s.proxies.find((p) => sameProxy(p, c))
     let found = await adapter.generate(acc, opts)
     // Imported proxies are owned ones: hand out those not in the library first.
-    if (adapter.mode === 'import') found = [...found.filter((c) => !existing(c)), ...found.filter((c) => existing(c))].slice(0, Math.max(1, opts.count))
+    if (adapter.mode === 'import' && opts.pool !== 'rotating') found = [...found.filter((c) => !existing(c)), ...found.filter((c) => existing(c))].slice(0, Math.max(1, opts.count))
     const configs: ProxyConfig[] = found.map(({ protocol, host, port, username, password }) => ({ protocol, host, port, ...(username ? { username } : {}), ...(password ? { password } : {}) }))
     if (!save) return { configs, saved: [] as SavedProxy[] }
     const now = Date.now()

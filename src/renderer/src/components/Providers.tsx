@@ -145,24 +145,36 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
   useEffect(() => { localStorage.setItem('prov.protocol', protocol) }, [protocol])
   const [busy, setBusy] = useState(false)
   const [importMode, setImportMode] = useState(false)
+  const [hasPool, setHasPool] = useState(false)
+  const [pool, setPool] = useState<'owned' | 'rotating'>('owned')
   useEffect(() => {
     if (!acc) return
     setImportMode(false)
+    setHasPool(false)
+    setPool('owned')
     window.api.providers.meta().then((m) => {
-      const imp = m.find((x) => x.id === acc.provider)?.mode === 'import'
+      const meta = m.find((x) => x.id === acc.provider)
+      const imp = meta?.mode === 'import'
       setImportMode(imp)
+      setHasPool(!!meta?.rotatingPool)
       if (imp) { setCountry(''); setCount(single ? 1 : 100) }
     }).catch(() => undefined)
     setCountries([])
     window.api.providers.countries(acc.id).then(setCountries).catch(() => setCountries([]))
   }, [acc])
+  const owned = importMode && pool === 'owned'
+  const pickPool = (v: 'owned' | 'rotating'): void => {
+    setPool(v)
+    setCountry('')
+    setCount(single ? 1 : v === 'rotating' ? 5 : 100)
+  }
   const run = async (): Promise<void> => {
     if (!acc) return
     setBusy(true)
     try {
-      const r = await window.api.providers.generate(acc.id, { protocol, country: country || undefined, count: single ? 1 : count, sticky, ttlHours: ttl }, true)
+      const r = await window.api.providers.generate(acc.id, { protocol, country: country || undefined, count: single ? 1 : count, sticky, ttlHours: ttl, ...(hasPool ? { pool } : {}) }, true)
       setProxies(await window.api.proxies.list())
-      toast.ok(t(importMode ? 'prov.imported' : 'prov.generated', { n: r.saved.length }))
+      toast.ok(t(owned ? 'prov.imported' : 'prov.generated', { n: r.saved.length }))
       onGenerated?.(r.saved)
       onClose()
     } catch (e) {
@@ -175,22 +187,28 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
     <Modal open={!!acc} onClose={onClose} title={`${t(importMode ? 'prov.import' : 'prov.generate')}: ${acc?.label || ''}`} width={460}
       footer={<><Button onClick={onClose}>{t('common.cancel')}</Button><Button variant="primary" loading={busy} onClick={run} icon={<Lightning size={14} weight="fill" />}>{t(importMode ? 'prov.import' : 'prov.generate')}</Button></>}>
       <div className="flex flex-col gap-4">
-        {importMode && <p className="text-[12.5px] text-fg-muted">{t('prov.importHint')}</p>}
+        {hasPool && (
+          <Field label={t('prov.pool')}>
+            <Segmented<'owned' | 'rotating'> value={pool} onChange={pickPool} options={[{ id: 'owned', label: t('prov.poolOwned') }, { id: 'rotating', label: t('prov.poolRotating') }]} />
+          </Field>
+        )}
+        {owned && <p className="text-[12.5px] text-fg-muted">{t('prov.importHint')}</p>}
+        {importMode && pool === 'rotating' && <p className="text-[12.5px] text-fg-muted">{t('prov.rotatingHint')}</p>}
         <Field label={t('prov.protocol')}>
           <Segmented<'http' | 'socks5'> value={protocol} onChange={setProtocol} options={[{ id: 'http', label: 'HTTP' }, { id: 'socks5', label: 'SOCKS5' }]} />
         </Field>
         <Field label={t('prov.country')}>
-          {countries.length ? (
+          {countries.length && owned ? (
             <Select value={country} onChange={(e) => setCountry(e.target.value)}>
               <option value="">{t('prov.anyCountry')}</option>
               {countries.map((c) => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
             </Select>
           ) : (
-            <Input value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} placeholder="US" className="w-28 font-mono" maxLength={2} />
+            <Input value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} placeholder={owned || !importMode ? 'US' : t('prov.anyCountry')} className="w-28 font-mono" maxLength={2} />
           )}
         </Field>
         {!single && <Field label={t('prov.count')}><Input type="number" min={1} max={100} value={count} onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} className="w-28 font-mono" /></Field>}
-        {!importMode && <Toggle checked={sticky} onChange={setSticky} label={sticky ? t('prov.sticky') : t('prov.rotating')} />}
+        {!owned && <Toggle checked={sticky} onChange={setSticky} label={sticky ? t('prov.sticky') : t('prov.rotating')} />}
         {!importMode && sticky && <Field label={t('prov.ttl')} hint={acc?.provider === '2captcha' ? '2Captcha: max 2 h' : 'GonzoProxy: max 168 h'}><Input type="number" min={1} max={168} value={ttl} onChange={(e) => setTtl(Math.max(1, Math.min(168, Number(e.target.value) || 24)))} className={cx('w-28 font-mono')} /></Field>}
       </div>
     </Modal>

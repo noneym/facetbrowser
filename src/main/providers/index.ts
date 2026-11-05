@@ -19,10 +19,13 @@ export interface ProviderAdapter {
   // 'generate' builds gateway logins on demand; 'import' lists proxies the
   // account already bought (all matches; the caller applies the count).
   mode?: 'generate' | 'import'
+  // Import providers that can also build logins on a rotating gateway plan
+  // (opts.pool = 'rotating').
+  rotatingPool?: boolean
 }
 
 export const providers: Record<ProviderId, ProviderAdapter> = { gonzoproxy, '2captcha': twocaptcha, proxycheap }
 
-export function providerMeta(): Array<Pick<ProviderAdapter, 'id' | 'name' | 'fields' | 'canGenerate'> & { mode: 'generate' | 'import' }> {
-  return Object.values(providers).map((p) => ({ id: p.id, name: p.name, fields: p.fields, canGenerate: p.canGenerate, mode: p.mode || 'generate' }))
+export function providerMeta(): Array<Pick<ProviderAdapter, 'id' | 'name' | 'fields' | 'canGenerate'> & { mode: 'generate' | 'import'; rotatingPool: boolean }> {
+  return Object.values(providers).map((p) => ({ id: p.id, name: p.name, fields: p.fields, canGenerate: p.canGenerate, mode: p.mode || 'generate', rotatingPool: !!p.rotatingPool }))
 }

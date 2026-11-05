@@ -101,6 +101,9 @@ export interface ProviderGenerateOptions {
   count: number
   sticky: boolean
   ttlHours?: number
+  // Import providers with a gateway plan: list owned proxies or build
+  // gateway logins on the rotating plan.
+  pool?: 'owned' | 'rotating'
 }
 
 export interface ProviderCountry {
