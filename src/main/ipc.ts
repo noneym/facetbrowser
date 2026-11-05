@@ -431,6 +431,7 @@ export function registerIpc(): void {
   ipcMain.handle('providers:save', async (_e, acc: Omit<ProviderAccount, 'createdAt' | 'updatedAt'>) => { await wrap(() => cloud.providerAccountSave(acc)); return loadAccounts() })
   ipcMain.handle('providers:delete', async (_e, id: string) => { await wrap(() => cloud.providerAccountDelete(id)); return loadAccounts() })
   ipcMain.handle('providers:balance', async (_e, id: string) => { const acc = await accountById(id); return providers[acc.provider].balance(acc) })
+  ipcMain.handle('providers:plans', async (_e, id: string) => { const acc = await accountById(id); return providers[acc.provider].plans?.(acc) ?? [] })
   ipcMain.handle('providers:countries', async (_e, id: string) => { const acc = await accountById(id); return providers[acc.provider].countries(acc) })
   ipcMain.handle('providers:generate', async (_e, id: string, opts: ProviderGenerateOptions, save: boolean) => {
     const acc = await accountById(id)

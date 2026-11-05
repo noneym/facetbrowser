@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Plus, Trash, ArrowsClockwise, Lightning } from '@phosphor-icons/react'
-import type { ProviderAccount, ProviderBalance, ProviderCountry, ProviderId } from '@shared/cloud'
+import type { ProviderAccount, ProviderBalance, ProviderCountry, ProviderId, ProviderPlan } from '@shared/cloud'
 import type { SavedProxy } from '@shared/types'
 import { useApp } from '@/store/app'
 import { useT } from '@/lib/i18n'
+import { allCountries } from '@/lib/countries'
 import { toast, errMsg } from '@/store/toast'
 import { Button, Field, Input, Modal, Select, Toggle, IconButton, Spinner, Segmented, cx } from '@/components/ui'
 
@@ -147,6 +148,9 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
   const [importMode, setImportMode] = useState(false)
   const [hasPool, setHasPool] = useState(false)
   const [pool, setPool] = useState<'owned' | 'rotating'>('owned')
+  const [plans, setPlans] = useState<ProviderPlan[]>([])
+  const [plan, setPlan] = useState('')
+  const [ttlMin, setTtlMin] = useState(30)
   useEffect(() => {
     if (!acc) return
     setImportMode(false)
@@ -158,7 +162,9 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
       setImportMode(imp)
       setHasPool(!!meta?.rotatingPool)
       if (imp) { setCountry(''); setCount(single ? 1 : 100) }
+      if (meta?.rotatingPool) window.api.providers.plans(acc.id).then((ps) => { setPlans(ps); setPlan(ps[0]?.id || '') }).catch(() => setPlans([]))
     }).catch(() => undefined)
+    setPlans([])
     setCountries([])
     window.api.providers.countries(acc.id).then(setCountries).catch(() => setCountries([]))
   }, [acc])
@@ -172,7 +178,7 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
     if (!acc) return
     setBusy(true)
     try {
-      const r = await window.api.providers.generate(acc.id, { protocol, country: country || undefined, count: single ? 1 : count, sticky, ttlHours: ttl, ...(hasPool ? { pool } : {}) }, true)
+      const r = await window.api.providers.generate(acc.id, { protocol, country: country || undefined, count: single ? 1 : count, sticky, ttlHours: ttl, ...(hasPool ? { pool, plan: plan || undefined, ttlMinutes: ttlMin } : {}) }, true)
       setProxies(await window.api.proxies.list())
       toast.ok(t(owned ? 'prov.imported' : 'prov.generated', { n: r.saved.length }))
       onGenerated?.(r.saved)
@@ -194,21 +200,29 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
         )}
         {owned && <p className="text-[12.5px] text-fg-muted">{t('prov.importHint')}</p>}
         {importMode && pool === 'rotating' && <p className="text-[12.5px] text-fg-muted">{t('prov.rotatingHint')}</p>}
+        {importMode && pool === 'rotating' && plans.length > 1 && (
+          <Field label={t('prov.plan')}>
+            <Select value={plan} onChange={(e) => setPlan(e.target.value)}>
+              {plans.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </Select>
+          </Field>
+        )}
         <Field label={t('prov.protocol')}>
           <Segmented<'http' | 'socks5'> value={protocol} onChange={setProtocol} options={[{ id: 'http', label: 'HTTP' }, { id: 'socks5', label: 'SOCKS5' }]} />
         </Field>
         <Field label={t('prov.country')}>
-          {countries.length && owned ? (
+          {(countries.length && owned) || (importMode && !owned) ? (
             <Select value={country} onChange={(e) => setCountry(e.target.value)}>
               <option value="">{t('prov.anyCountry')}</option>
-              {countries.map((c) => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
+              {(owned ? countries : allCountries()).map((c) => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
             </Select>
           ) : (
             <Input value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} placeholder={owned || !importMode ? 'US' : t('prov.anyCountry')} className="w-28 font-mono" maxLength={2} />
           )}
         </Field>
-        {!single && <Field label={t('prov.count')}><Input type="number" min={1} max={100} value={count} onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} className="w-28 font-mono" /></Field>}
+        {!single && (owned || !importMode || sticky) && <Field label={t('prov.count')}><Input type="number" min={1} max={100} value={count} onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} className="w-28 font-mono" /></Field>}
         {!owned && <Toggle checked={sticky} onChange={setSticky} label={sticky ? t('prov.sticky') : t('prov.rotating')} />}
+        {importMode && !owned && sticky && <Field label={t('prov.ttlMin')} hint="Proxy-Cheap: max 30 min"><Input type="number" min={1} max={30} value={ttlMin} onChange={(e) => setTtlMin(Math.max(1, Math.min(30, Number(e.target.value) || 30)))} className="w-28 font-mono" /></Field>}
         {!importMode && sticky && <Field label={t('prov.ttl')} hint={acc?.provider === '2captcha' ? '2Captcha: max 2 h' : 'GonzoProxy: max 168 h'}><Input type="number" min={1} max={168} value={ttl} onChange={(e) => setTtl(Math.max(1, Math.min(168, Number(e.target.value) || 24)))} className={cx('w-28 font-mono')} /></Field>}
       </div>
     </Modal>

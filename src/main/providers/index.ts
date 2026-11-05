@@ -1,4 +1,4 @@
-import type { ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerateOptions, ProviderId } from '@shared/cloud'
+import type { ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerateOptions, ProviderId, ProviderPlan } from '@shared/cloud'
 import type { ProxyConfig } from '@shared/types'
 import { gonzoproxy } from './gonzoproxy'
 import { twocaptcha } from './twocaptcha'
@@ -20,12 +20,12 @@ export interface ProviderAdapter {
   // account already bought (all matches; the caller applies the count).
   mode?: 'generate' | 'import'
   // Import providers that can also build logins on a rotating gateway plan
-  // (opts.pool = 'rotating').
-  rotatingPool?: boolean
+  // (opts.pool = 'rotating', opts.plan = one of these).
+  plans?(acc: ProviderAccount): Promise<ProviderPlan[]>
 }
 
 export const providers: Record<ProviderId, ProviderAdapter> = { gonzoproxy, '2captcha': twocaptcha, proxycheap }
 
 export function providerMeta(): Array<Pick<ProviderAdapter, 'id' | 'name' | 'fields' | 'canGenerate'> & { mode: 'generate' | 'import'; rotatingPool: boolean }> {
-  return Object.values(providers).map((p) => ({ id: p.id, name: p.name, fields: p.fields, canGenerate: p.canGenerate, mode: p.mode || 'generate', rotatingPool: !!p.rotatingPool }))
+  return Object.values(providers).map((p) => ({ id: p.id, name: p.name, fields: p.fields, canGenerate: p.canGenerate, mode: p.mode || 'generate', rotatingPool: !!p.plans }))
 }

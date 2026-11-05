@@ -4,7 +4,7 @@ import type {
   ProxyCheckResult, ProxyConfig, RunningProfile, SavedProxy, Settings
 } from '@shared/types'
 import type { EngineStatus, FeaturedExtension, InstalledExtension, UpdateStatus } from '@shared/types'
-import type { CloudStatus, ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerateOptions } from '@shared/cloud'
+import type { CloudStatus, ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerateOptions, ProviderPlan } from '@shared/cloud'
 
 type Listener<T> = (payload: T) => void
 function on<T>(channel: string, cb: Listener<T>): () => void {
@@ -111,6 +111,7 @@ const api = {
     delete: (id: string): Promise<ProviderAccount[]> => ipcRenderer.invoke('providers:delete', id),
     balance: (id: string): Promise<ProviderBalance> => ipcRenderer.invoke('providers:balance', id),
     countries: (id: string): Promise<ProviderCountry[]> => ipcRenderer.invoke('providers:countries', id),
+    plans: (id: string): Promise<ProviderPlan[]> => ipcRenderer.invoke('providers:plans', id),
     generate: (id: string, opts: ProviderGenerateOptions, save: boolean): Promise<{ configs: ProxyConfig[]; saved: SavedProxy[] }> => ipcRenderer.invoke('providers:generate', id, opts, save)
   },
   checker: {

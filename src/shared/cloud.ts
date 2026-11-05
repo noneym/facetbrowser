@@ -104,6 +104,14 @@ export interface ProviderGenerateOptions {
   // Import providers with a gateway plan: list owned proxies or build
   // gateway logins on the rotating plan.
   pool?: 'owned' | 'rotating'
+  // Rotating plan to use (ProviderPlan.id) and sticky session length.
+  plan?: string
+  ttlMinutes?: number
+}
+
+export interface ProviderPlan {
+  id: string
+  label: string
 }
 
 export interface ProviderCountry {

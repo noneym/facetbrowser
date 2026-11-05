@@ -1,38 +1,39 @@
-import type { ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerateOptions } from '@shared/cloud'
-import type { ProxyConfig } from '@shared/types'
+import type { ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerateOptions, ProviderPlan } from '@shared/cloud'
 import type { ProviderAdapter, ProviderProxy } from './index'
-import { parseProxyLine } from '../proxy/parse'
 
 // Proxy-Cheap (docs.proxy-cheap.com). Proxies are bought in the dashboard;
 // the API lists them with their connection details, so this provider imports
 // owned proxies instead of generating gateway logins. Auth: X-Api-Key and
 // X-Api-Secret headers from app.proxy-cheap.com/api-keys.
 //   GET /account/balance -> { balance }
-//   GET /proxies -> [{ id, status, networkType, countryCode,
+//   GET /proxies -> { proxies: [{ id, status, networkType, countryCode, serviceId,
 //        authentication: { username, password, whitelistedIps[] },
 //        connection: { publicIp, connectIp, httpPort, httpsPort, socks5Port },
-//        proxyType, expiresAt, metadata: { ispName } }]
+//        proxyType, expiresAt, bandwidth: { total, used }, metadata: { ispName } }] }
 //
-// Rotating plans (networkType ROTATING_RESIDENTIAL / ROTATING_MOBILE) have no
-// public IP: they are gateway logins whose targeting lives in the username,
-// as the dashboard's Setup Credentials generator builds them:
-//   pcXXXXXXXX-res-<cc|any>[-session-<id>]:PC_xxx@proxy-us.proxy-cheap.com:5959 (SOCKS5 9595)
-// Older plans use proxy.proxy-cheap.com:31112 with the targeting in the
-// password: <pass>_country-<cc>[_session-<id>_lifetime-30m].
+// Rotating plans (serviceId rotating-residential) come back with a login but
+// no host or port. Verified against a live account: they connect through
+// thehub.proxy-cheap.com:8080 (HTTP and SOCKS5 on the same port), with the
+// targeting appended to the password:
+//   <pass>_country-de                      new IP per connection, in DE
+//   <pass>_country-de_session-ab12cd34_ttl-30   same IP for 1-30 minutes
+// Unknown keys or a ttl over 30 are answered with "internal error".
 const API = 'https://api.proxy-cheap.com'
-const GATEWAY = 'proxy-us.proxy-cheap.com'
-const GATEWAY_HTTP = 5959
-const GATEWAY_SOCKS = 9595
+const GATEWAY = 'thehub.proxy-cheap.com'
+const GATEWAY_PORT = 8080
+const MAX_TTL_MIN = 30
 
 interface PcProxy {
   id: number | string
   status?: string
   networkType?: string
-  countryCode?: string
+  countryCode?: string | null
+  serviceId?: string
   authentication?: { username?: string | null; password?: string | null; whitelistedIps?: string[] }
   connection?: { publicIp?: string | null; connectIp?: string | null; httpPort?: number | string | null; httpsPort?: number | string | null; socks5Port?: number | string | null }
   proxyType?: string
   expiresAt?: string | null
+  bandwidth?: { total?: number | null; used?: number | null }
   metadata?: { ispName?: string | null }
 }
 
@@ -61,60 +62,34 @@ const port = (v: unknown): number | null => {
   return Number.isInteger(n) && n > 0 && n < 65536 ? n : null
 }
 
-const pretty = (s: string | undefined): string => (s || '').toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+const pretty = (s: string | undefined): string => (s || '').toLowerCase().replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 
-const isRotating = (p: PcProxy): boolean => /ROTAT/i.test(`${p.networkType || ''} ${p.proxyType || ''}`) || !p.connection?.publicIp
+const isRotating = (p: PcProxy): boolean => /^rotating/i.test(p.serviceId || '') || /ROTAT/i.test(p.networkType || '') || !p.connection?.publicIp
 
-const isIp = (h: string): boolean => /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')
+const gb = (n: number | null | undefined): string => `${Number(n || 0).toFixed(2).replace(/\.?0+$/, '')} GB`
 
-const sessionId = (): string => Math.random().toString(36).slice(2, 10)
+const planLabel = (p: PcProxy): string => `${pretty(p.serviceId || 'rotating')} #${p.id}${p.bandwidth?.total ? ` (${gb(p.bandwidth.used)} / ${gb(p.bandwidth.total)})` : ''}`
 
-// The gateway login of a rotating plan: from the API, else from the login the
-// user pasted from Setup Credentials into the account.
-function gatewayLogin(acc: ProviderAccount, p: PcProxy | null): ProxyConfig | null {
-  const a = p?.authentication || {}
-  const c = p?.connection || {}
-  if (a.username && a.password) {
-    // pc-prefixed logins belong to the current gateway; others to the legacy one.
-    const legacy = !/^pc/i.test(a.username)
-    const host = c.connectIp && !isIp(c.connectIp) ? c.connectIp : legacy ? 'proxy.proxy-cheap.com' : GATEWAY
-    return { protocol: 'http', host, port: port(c.httpPort) ?? (legacy ? 31112 : GATEWAY_HTTP), username: a.username, password: a.password }
-  }
-  const pasted = acc.credentials.rotatingLogin?.trim()
-  return pasted ? parseProxyLine(pasted, 'http') : null
-}
+const sessionId = (): string => Array.from({ length: 8 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('')
 
-// Applies country and session to a gateway login; the base login may come
-// with targeting already in it, which is replaced.
-function target(login: ProxyConfig, p: PcProxy | null, opts: ProviderGenerateOptions, protocol: 'http' | 'socks5'): ProviderProxy {
+// One gateway login on a rotating plan, targeted by country and session.
+function rotatingLogin(p: PcProxy, opts: ProviderGenerateOptions, protocol: 'http' | 'socks5'): ProviderProxy {
+  const a = p.authentication || {}
+  const c = p.connection || {}
   const cc = opts.country?.toLowerCase()
-  const c = p?.connection || {}
-  const legacy = login.port === 31112 || /^proxy\.proxy-cheap\.com$/i.test(login.host)
-  let { username = '', password = '' } = login
-  let pt = login.port
-  if (legacy) {
-    password = password.replace(/_(country|session|lifetime)-[^_]*/g, '')
-    if (cc) password += `_country-${cc}`
-    if (opts.sticky) password += `_session-${sessionId()}_lifetime-30m`
-    // The legacy gateway has no documented SOCKS5 port unless the API gives one.
-    const socks = port(c.socks5Port)
-    if (protocol === 'socks5' && socks) pt = socks
-    else if (protocol === 'socks5' && login.protocol !== 'socks5') protocol = 'http'
-  } else {
-    const m = username.match(/^(.+?)-(res|mob|isp)(?:-|$)/)
-    const product = m ? m[2] : /MOBILE/i.test(p?.networkType || '') ? 'mob' : 'res'
-    username = `${m ? m[1] : username}-${product}-${cc || 'any'}${opts.sticky ? `-session-${Math.floor(1e7 + Math.random() * 9e7)}` : ''}`
-    if (login.protocol !== protocol) pt = protocol === 'socks5' ? port(c.socks5Port) ?? GATEWAY_SOCKS : port(c.httpPort) ?? GATEWAY_HTTP
-  }
-  const cc2 = cc?.toUpperCase()
+  let password = a.password || ''
+  if (cc) password += `_country-${cc}`
+  if (opts.sticky) password += `_session-${sessionId()}_ttl-${Math.max(1, Math.min(MAX_TTL_MIN, Math.round(opts.ttlMinutes || MAX_TTL_MIN)))}`
+  const pt = (protocol === 'socks5' ? port(c.socks5Port) : port(c.httpPort) ?? port(c.httpsPort)) ?? GATEWAY_PORT
+  const name = ['Proxy-Cheap', 'Rotating', cc?.toUpperCase() || 'Any', opts.sticky ? 'sticky' : ''].filter(Boolean).join(' ')
   return {
     protocol,
-    host: login.host,
+    host: c.connectIp || GATEWAY,
     port: pt,
-    username,
+    username: a.username || '',
     password,
-    name: ['Proxy-Cheap', 'Rotating', cc2 || 'Any', opts.sticky ? 'sticky' : ''].filter(Boolean).join(' '),
-    tags: ['proxycheap', 'Rotating', ...(cc2 ? [cc2] : []), ...(opts.sticky ? ['sticky'] : [])]
+    name,
+    tags: ['proxycheap', 'Rotating', ...(cc ? [cc.toUpperCase()] : []), ...(opts.sticky ? ['sticky'] : [])]
   }
 }
 
@@ -131,18 +106,18 @@ export const proxycheap: ProviderAdapter = {
   mode: 'import',
   fields: [
     { key: 'apiKey', label: 'API key', secret: true, hint: 'app.proxy-cheap.com > API keys' },
-    { key: 'apiSecret', label: 'API secret', secret: true },
-    { key: 'rotatingLogin', label: 'Rotating login', secret: true, optional: true, hint: 'Only if the API gives no login for a rotating plan: one line from Setup Credentials (user:pass@host:port)' }
+    { key: 'apiSecret', label: 'API secret', secret: true }
   ],
-  rotatingPool: true,
 
   async balance(acc): Promise<ProviderBalance> {
     try {
       const [b, proxies] = await Promise.all([call<{ balance?: number | string }>(acc, '/account/balance'), activeProxies(acc)])
       const lines = [{ label: 'Balance', value: `$${Number(b.balance ?? 0).toFixed(2)}` }]
       const byType = new Map<string, number>()
-      for (const p of proxies) byType.set(pretty(p.networkType) || 'Proxy', (byType.get(pretty(p.networkType) || 'Proxy') || 0) + 1)
+      const kind = (p: PcProxy): string => (isRotating(p) ? 'Rotating' : pretty(p.networkType) || 'Proxy')
+      for (const p of proxies) byType.set(kind(p), (byType.get(kind(p)) || 0) + 1)
       lines.push({ label: 'Active proxies', value: proxies.length ? [...byType].map(([k, n]) => `${n} ${k}`).join(', ') : '0' })
+      for (const p of proxies.filter(isRotating)) if (p.bandwidth?.total) lines.push({ label: `Rotating #${p.id}`, value: `${gb(p.bandwidth.used)} used of ${gb(p.bandwidth.total)}` })
       const next = proxies.map((p) => (p.expiresAt ? Date.parse(p.expiresAt) : NaN)).filter(Number.isFinite).sort((a, b) => a - b)[0]
       if (next) lines.push({ label: 'Next expiry', value: new Date(next).toLocaleDateString() })
       return { ok: true, lines }
@@ -152,7 +127,7 @@ export const proxycheap: ProviderAdapter = {
   },
 
   // Only the countries the account owns static proxies in; rotating plans
-  // take any country code.
+  // take any country code, which the dialog lists itself.
   async countries(acc) {
     const proxies = (await activeProxies(acc)).filter((p) => !isRotating(p))
     const codes = [...new Set(proxies.map((p) => p.countryCode?.toUpperCase()).filter((c): c is string => !!c))]
@@ -161,24 +136,23 @@ export const proxycheap: ProviderAdapter = {
     return codes.map((code): ProviderCountry => ({ code, name: names?.of(code) || code })).sort((a, b) => a.name.localeCompare(b.name))
   },
 
-  // Every active proxy that matches; the caller prefers ones not imported yet
-  // and applies the count.
+  async plans(acc): Promise<ProviderPlan[]> {
+    return (await activeProxies(acc)).filter((p) => isRotating(p) && p.authentication?.username && p.authentication.password).map((p) => ({ id: String(p.id), label: planLabel(p) }))
+  },
+
+  // Owned pool: every active proxy that matches; the caller prefers ones not
+  // imported yet and applies the count. Rotating pool: gateway logins.
   async generate(acc, opts) {
     const want = opts.protocol === 'socks5' ? 'socks5' : 'http'
     const country = opts.country?.toUpperCase()
     const all = await activeProxies(acc)
     if (opts.pool === 'rotating') {
-      const plans = all.filter(isRotating)
-      const plan = plans.find((p) => gatewayLogin(acc, p)) || null
-      const login = gatewayLogin(acc, plan)
-      if (!login) {
-        throw new Error(plans.length
-          ? 'Proxy-Cheap: the API gives no login for the rotating plan; paste one line from Setup Credentials into the Rotating login field of this account'
-          : 'Proxy-Cheap: no active rotating plan on this account')
-      }
+      const plans = all.filter((p) => isRotating(p) && p.authentication?.username && p.authentication.password)
+      const plan = plans.find((p) => String(p.id) === opts.plan) || plans[0]
+      if (!plan) throw new Error('Proxy-Cheap: no active rotating plan on this account')
       // A rotating login is the same line every time; sticky ones get a session each.
       const n = opts.sticky ? Math.max(1, Math.min(100, opts.count)) : 1
-      return Array.from({ length: n }, () => target(login, plan, opts, want))
+      return Array.from({ length: n }, () => rotatingLogin(plan, opts, want))
     }
     const out: ProviderProxy[] = []
     for (const p of all) {
