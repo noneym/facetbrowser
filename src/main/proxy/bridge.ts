@@ -62,6 +62,14 @@ function connectUpstream(proxy: ProxyConfig, host: string, port: number): Promis
 export function startBridge(proxy: ProxyConfig): Promise<Bridge> {
   const state = { bytesIn: 0, bytesOut: 0 }
   const server = http.createServer()
+  // Every client socket, CONNECT tunnels and detached sockets included:
+  // server.close() waits for all of them and closeAllConnections() only sees
+  // plain HTTP ones, so close() could otherwise wait forever.
+  const sockets = new Set<net.Socket>()
+  server.on('connection', (s: net.Socket) => {
+    sockets.add(s)
+    s.on('close', () => sockets.delete(s))
+  })
 
   // HTTPS and WebSocket: CONNECT tunnel.
   server.on('connect', (req, clientSocket, head) => {
@@ -135,7 +143,10 @@ export function startBridge(proxy: ProxyConfig): Promise<Bridge> {
         port: addr.port,
         get bytesIn() { return state.bytesIn },
         get bytesOut() { return state.bytesOut },
-        close: () => new Promise<void>((r) => { server.closeAllConnections?.(); server.close(() => r()) })
+        close: () => new Promise<void>((r) => {
+          server.close(() => r())
+          for (const s of sockets) s.destroy()
+        })
       })
     })
   })

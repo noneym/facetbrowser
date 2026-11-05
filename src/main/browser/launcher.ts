@@ -17,9 +17,15 @@ interface Running {
   tabTimer: NodeJS.Timeout | null
   ready?: boolean // start tabs are open; from here on, no tabs left means the user closed the browser
   emptyTimer?: NodeJS.Timeout | null
+  watchTimer?: NodeJS.Timeout | null
 }
 
 const MAX_TABS = 50
+const WATCH_MS = 3000
+// Upper bounds for the steps of a stop, so a stuck upload or an unanswered
+// close cannot leave the profile marked as running.
+const BEFORE_STOP_MS = 30000
+const CLOSE_MS = 15000
 
 // Limits for the localStorage part of the account jar (server cap is 8 MB).
 const STORAGE_ITEM_MAX = 256 * 1024
@@ -226,6 +232,10 @@ class Launcher extends EventEmitter {
       const entry: Running = { context, bridge, startedAt: Date.now(), state: 'running', origins: new Set(), tabs: new Map(), tabSnapshot: [], tabTimer: null }
       this.running.set(profile.id, entry)
       context.on('close', () => this.cleanup(profile.id))
+      // Backstop for the close events below: a window closed while the start
+      // tabs were still opening (not ready yet), a missed page close, or a
+      // browser that went away without the context noticing.
+      entry.watchTimer = setInterval(() => this.watch(profile.id, entry), WATCH_MS)
       // Tab tracking for "reopen where I left off". A tab that closes is
       // dropped from the snapshot only after a short delay: when the browser
       // shuts down every tab closes at once, and that burst must not wipe the
@@ -290,29 +300,47 @@ class Launcher extends EventEmitter {
     }
   }
 
+  private watch(profileId: string, entry: Running): void {
+    if (this.running.get(profileId) !== entry) {
+      if (entry.watchTimer) clearInterval(entry.watchTimer)
+      return
+    }
+    const browser = entry.context.browser()
+    if (browser && !browser.isConnected()) {
+      this.cleanup(profileId).catch(() => {})
+      return
+    }
+    if (entry.ready && entry.state === 'running' && !safePages(entry.context)) this.stop(profileId).catch(() => {})
+  }
+
   private async cleanup(profileId: string): Promise<void> {
     const r = this.running.get(profileId)
     if (!r) return
     this.running.delete(profileId)
     if (r.tabTimer) clearTimeout(r.tabTimer)
     if (r.emptyTimer) clearTimeout(r.emptyTimer)
-    await r.bridge?.close().catch(() => {})
-    this.emit('closed', profileId, r.tabSnapshot)
+    if (r.watchTimer) clearInterval(r.watchTimer)
+    // Report the close before anything that can stall or throw. The entry is
+    // already gone, so a status that never went out left the profile shown as
+    // running, with a Stop button that found nothing to stop.
+    try {
+      this.emit('closed', profileId, r.tabSnapshot)
+    } catch {
+      /* a listener failed; the profile is closed regardless */
+    }
     this.emitStatus()
+    await r.bridge?.close().catch(() => {})
   }
 
   async stop(profileId: string): Promise<void> {
     const r = this.running.get(profileId)
-    if (!r) return
+    // Nothing tracked: the list on screen is stale, so send the real one.
+    if (!r) return this.emitStatus()
     r.state = 'stopping'
     this.emitStatus()
     // Give listeners (cookie upload) a chance to read the live context first.
-    await Promise.all(this.listeners('beforeStop').map((l) => Promise.resolve((l as (id: string) => Promise<void>)(profileId)).catch(() => {})))
-    try {
-      await r.context?.close()
-    } catch {
-      /* ignore */
-    }
+    await timeout(Promise.all(this.listeners('beforeStop').map((l) => Promise.resolve((l as (id: string) => Promise<void>)(profileId)).catch(() => {}))), BEFORE_STOP_MS)
+    await timeout(Promise.resolve(r.context?.close()).catch(() => {}), CLOSE_MS)
     await this.cleanup(profileId)
   }
 
@@ -584,6 +612,11 @@ async function writeStorage(ctx: BrowserContext, storage: StorageOrigin[]): Prom
     if (ok) n++
   }
   return n
+}
+
+function timeout<T>(p: Promise<T>, ms: number): Promise<T | void> {
+  let t: NodeJS.Timeout
+  return Promise.race([p, new Promise<void>((r) => (t = setTimeout(r, ms)))]).finally(() => clearTimeout(t))
 }
 
 function safePages(ctx: BrowserContext): number {
