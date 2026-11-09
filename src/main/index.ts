@@ -89,7 +89,7 @@ if (!gotLock) {
     if (store().cloud.session) sync.start()
     updater.start(log)
     // Local Automation API (REST + WS) for AI agents and scripts; off by default.
-    automationServer.on('status', (st) => log(`automation ${st.running ? 'listening on 127.0.0.1:' + st.port : 'stopped'}${st.error ? ' error=' + st.error : ''}`))
+    automationServer.on('status', (st) => log(`automation ${st.running ? 'listening on 127.0.0.1:' + st.port : 'stopped'}${st.error ? ' error=' + st.error : ''}${st.remote ? ' remote=connected device=' + st.remoteDeviceId : st.remoteError ? ' remote=' + st.remoteError : ''}`))
     automationServer.apply(store().settings.automation).catch((e) => log(`automation start failed ${(e as Error).message}`))
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -7,7 +7,7 @@ refs, click/type/fill, JavaScript, console and network history, screenshots,
 cookies and raw Chrome DevTools Protocol. Design and roadmap:
 [`mcp-automation-plan.md`](mcp-automation-plan.md).
 
-Status: Faz 1 (service layer, REST, WebSocket) and Faz 2 (MCP server + stdio bridge) are done. Remote access through facetbrowser.com is planned (plan §10).
+Status: Faz 1 (service layer, REST, WebSocket), Faz 2 (MCP server + stdio bridge) and Faz 5 (remote access through facetbrowser.com, plan §10) are done.
 
 ## Enable
 
@@ -67,11 +67,93 @@ tab the default, after which `tabId` / `profileId` can be omitted;
 `facet_session_info` shows the selection. Each MCP session (one per client
 connection) has its own context.
 
-**Remote machine?** Not yet. The API is local by design; for now use an SSH
-tunnel (`ssh -L 48123:127.0.0.1:48123 home-pc`) and set
-`FACETBROWSER_MCP_URL` / `FACETBROWSER_TOKEN` for the bridge. A relay through
-facetbrowser.com (outbound connection from the app, scoped relay tokens) is
-planned in the plan document, §10.
+**Remote machine?** See [Remote access](#remote-access) below: the app dials
+out to facetbrowser.com and the agent connects there with a relay token. An SSH
+tunnel (`ssh -L 48123:127.0.0.1:48123 home-pc` plus `FACETBROWSER_MCP_URL` /
+`FACETBROWSER_TOKEN` for the bridge) still works when you prefer no relay.
+
+## Remote access
+
+FacetBrowser runs on your home or office PC; the agent (Claude Code on a
+laptop, a cloud session, Cursor, Claude Desktop) runs somewhere else. The app
+never opens an inbound port. Instead it keeps an outbound WebSocket to
+`wss://facetbrowser.com/api/relay/device` with your account session, and the
+relay mirrors the local API to agents:
+
+```
+agent  ──HTTPS, Bearer relayToken──►  facetbrowser.com/api/relay/<deviceId>/…  ◄──WSS (outbound)──  FacetBrowser (home PC) ── 127.0.0.1:<port>
+```
+
+Every agent request becomes a frame `{ id, method, path, headers, body }` that
+the app replays against its own `127.0.0.1:<port>` server with its own token;
+the response streams back chunk by chunk, so MCP's SSE channel works as it does
+locally. The relay knows no tool logic and stores no bodies.
+
+**Turn it on (home PC)**
+
+1. Sign in to your account in the app (Settings › Account).
+2. Settings › Automation API › enable the API and *Allow remote access
+   (through facetbrowser.com)*, Save. The status line shows
+   "Remote access connected · device <deviceId>"; `main.log` records
+   `remote=connected`. The device id is also on your account page.
+3. The app reconnects with exponential backoff (1 s … 60 s) when the
+   connection drops, and shows a system notification on the first remote
+   request of each connection.
+
+**Make a relay token (account page)**
+
+facetbrowser.com/account › *Remote access*: name the token, optionally bind it
+to one device and set an expiry, *Create token*. The token (`fbr_…`) is shown
+once; only its hash is stored. Revoke it there any time; agents lose access
+within two minutes (token cache) and the device list and access log live on
+the same card. Relay tokens open only `/api/relay/*`; they cannot read or
+change your account, profiles or cookies on the server.
+
+**Connect the agent**
+
+Claude Code / Cursor (Streamable HTTP):
+
+```bash
+claude mcp add --transport http facet-home https://facetbrowser.com/api/relay/<deviceId>/mcp --header "Authorization: Bearer fbr_…"
+```
+
+Claude Desktop (stdio bridge; `FACETBROWSER_RELAY_URL` only when the server is
+not facetbrowser.com):
+
+```json
+{ "mcpServers": { "facetbrowser": { "command": "npx", "args": ["-y", "facetbrowser-mcp", "--remote", "<deviceId>"], "env": { "FACETBROWSER_RELAY_TOKEN": "fbr_…" } } } }
+```
+
+`npx facetbrowser-mcp --remote` without a device id lists your devices (with a
+terminal it asks which one and prints the config); with exactly one device
+online it picks that one.
+
+REST works the same way, with the relay token in place of the local one:
+
+```bash
+curl -H "Authorization: Bearer fbr_…" https://facetbrowser.com/api/relay/<deviceId>/v1/profiles
+curl -H "Authorization: Bearer fbr_…" https://facetbrowser.com/api/relay/devices   # who is online
+```
+
+Replies you may see from the relay itself: `401 unauthorized` / `token_expired`
+(relay token), `403 token_device_mismatch` (token bound to another device),
+`404 unknown_device`, `503 device_offline` (app closed or remote access off),
+`504 device_timeout` (no answer within 120 s), `429` (600 requests/min or 8
+in flight per token).
+
+**What the server sees**
+
+Only `{ time, device, token, method, path, status, ms }` per request, shown as
+the access log on the account page and kept 30 days. Page contents,
+screenshots and tool arguments pass through in memory and are not logged. TLS
+covers agent → relay and relay → app; there is no end-to-end encryption
+between agent and app in this version. The `/v1/events` WebSocket is not
+tunnelled; use MCP log notifications or poll `facet_console_read` remotely.
+
+**Not available**: relay tokens need a verified email and an active plan, the
+same as sync. The `profileScope` field of a token is stored and sent with
+every frame but not yet enforced by the app; today a relay token has the same
+reach as the local token.
 
 ## Rules
 
