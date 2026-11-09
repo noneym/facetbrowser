@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, ArrowSquareOut } from '@phosphor-icons/react'
+import { FolderOpen, ArrowSquareOut, Copy, ArrowsClockwise } from '@phosphor-icons/react'
 import type { Settings } from '@shared/types'
+import type { AutomationStatus } from '@shared/automation'
 import { useApp } from '@/store/app'
 import { useT } from '@/lib/i18n'
 import { toast } from '@/store/toast'
-import { Button, Field, Input, Select, Modal, Toggle } from '@/components/ui'
+import { Button, Field, Input, Select, Modal, Toggle, cx } from '@/components/ui'
 import type { Key } from '@/lib/i18n'
 import { timeAgo } from '@/lib/format'
 
@@ -84,6 +85,8 @@ export function SettingsPage(): JSX.Element {
           </div>
         </Section>
 
+        <AutomationSection draft={draft} set={set} />
+
         <Section title={t('settings.about')}>
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-[12.5px]">
             <dt className="text-fg-muted">{t('settings.version')}</dt><dd className="font-mono">{info?.version}</dd>
@@ -96,6 +99,79 @@ export function SettingsPage(): JSX.Element {
         </Section>
       </div>
     </div>
+  )
+}
+
+// Local REST/WS API for AI agents (docs/automation.md). The draft is saved
+// with the page's Save button; the main process restarts the server when the
+// saved settings change.
+function AutomationSection({ draft, set }: { draft: Settings; set: <K extends keyof Settings>(k: K, v: Settings[K]) => void }): JSX.Element {
+  const t = useT()
+  const [status, setStatus] = useState<AutomationStatus | null>(null)
+  const saved = useApp((s) => s.settings)!
+  useEffect(() => {
+    window.api.automation.status().then(setStatus).catch(() => {})
+    return window.api.automation.onStatus(setStatus)
+  }, [])
+  const a = draft.automation
+  const patch = (p: Partial<Settings['automation']>): void => set('automation', { ...a, ...p })
+  const dirty = JSON.stringify(a) !== JSON.stringify(saved.automation)
+  const copy = async (text: string): Promise<void> => {
+    await navigator.clipboard.writeText(text)
+    toast.ok(t('common.copied'))
+  }
+  const regenerate = (): void => {
+    const bytes = new Uint8Array(32)
+    crypto.getRandomValues(bytes)
+    patch({ token: [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('') })
+  }
+  const curl = status?.running ? `curl -H "Authorization: Bearer ${saved.automation.token}" http://127.0.0.1:${status.port}/v1/profiles` : ''
+  return (
+    <Section title={t('settings.automation')} hint={t('settings.automationHint')}>
+      <Toggle checked={a.enabled} onChange={(v) => patch({ enabled: v })} label={t('settings.automationEnable')} hint={t('settings.automationEnableHint')} />
+      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] border border-line bg-bg px-3 py-2.5 text-[12.5px]">
+        <span className={cx('h-1.5 w-1.5 rounded-full', status?.running ? 'bg-ok live-dot' : 'bg-line-strong')} />
+        <span className={status?.error ? 'text-bad' : status?.running ? 'text-fg' : 'text-fg-muted'}>
+          {status?.error ? status.error : status?.running ? t('settings.automationRunning', { port: String(status.port) }) : t('settings.automationStopped')}
+        </span>
+        {dirty && <span className="text-fg-faint">· {t('settings.automationPending')}</span>}
+        {curl && <Button size="sm" variant="ghost" className="ml-auto" icon={<Copy size={13} />} onClick={() => copy(curl)}>curl</Button>}
+      </div>
+      <div className="grid grid-cols-[140px_1fr] gap-4">
+        <Field label={t('settings.automationPort')} hint={t('settings.automationPortHint')}>
+          <Input type="number" min={0} max={65535} value={a.port} onChange={(e) => patch({ port: Math.max(0, Math.min(65535, Number(e.target.value) || 0)) })} className="font-mono" />
+        </Field>
+        <Field label={t('settings.automationToken')} hint={t('settings.automationTokenHint')}>
+          <div className="flex gap-2">
+            <Input value={a.token} readOnly className="font-mono text-[12px]" onFocus={(e) => e.currentTarget.select()} />
+            <Button icon={<Copy size={15} />} onClick={() => copy(a.token)}>{t('common.copy')}</Button>
+            <Button variant="ghost" icon={<ArrowsClockwise size={15} />} onClick={regenerate}>{t('settings.automationNewToken')}</Button>
+          </div>
+        </Field>
+      </div>
+      <Toggle checked={a.exposeCdp} onChange={(v) => patch({ exposeCdp: v })} label={t('settings.automationExposeCdp')} hint={t('settings.automationExposeCdpHint')} />
+      <Toggle checked={!!a.remote} onChange={(v) => patch({ remote: v })} label={t('settings.automationRemote')} hint={t('settings.automationRemoteHint')} />
+      {saved.automation.remote && saved.automation.enabled && (
+        <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] border border-line bg-bg px-3 py-2.5 text-[12.5px]">
+          <span className={cx('h-1.5 w-1.5 rounded-full', status?.remote ? 'bg-ok live-dot' : status?.remoteError ? 'bg-bad' : 'bg-line-strong')} />
+          <span className={status?.remote ? 'text-fg' : status?.remoteError ? 'text-bad' : 'text-fg-muted'}>
+            {status?.remote
+              ? t('settings.automationRemoteOn', { id: status.remoteDeviceId || '' })
+              : status?.remoteError === 'not_logged_in'
+                ? t('settings.automationRemoteLogin')
+                : status?.remoteError
+                  ? t('settings.automationRemoteError', { error: status.remoteError })
+                  : t('settings.automationRemoteConnecting')}
+          </span>
+          <button className="ml-auto text-fg-muted hover:underline" onClick={() => window.api.app.openExternal(`${saved.apiBaseUrl || 'https://facetbrowser.com'}/account`)}>{t('settings.automationRemoteTokens')}</button>
+        </div>
+      )}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-[12.5px]">
+        <dt className="text-fg-muted">{t('settings.automationDiscovery')}</dt>
+        <dd className="font-mono"><button className="hover:underline" onClick={() => status && window.api.app.openPath(status.discoveryFile.replace(/[\\/][^\\/]+$/, ''))}>{status?.discoveryFile}</button></dd>
+      </dl>
+      <p className="text-[12px] text-fg-faint">{t('settings.automationDocs')}</p>
+    </Section>
   )
 }
 

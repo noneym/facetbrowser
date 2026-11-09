@@ -2,7 +2,8 @@ import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
-import type { Group, Profile, SavedProxy, Settings, InstalledExtension } from '@shared/types'
+import { randomBytes } from 'crypto'
+import type { AutomationSettings, Group, Profile, SavedProxy, Settings, InstalledExtension } from '@shared/types'
 import type { CloudSession, SyncCollection } from '@shared/cloud'
 
 export interface Tombstone {
@@ -46,8 +47,28 @@ export function defaultSettings(): Settings {
     proxyCheckConcurrency: 5,
     speedTestBytes: 500000,
     language: 'tr',
-    apiBaseUrl: 'https://facetbrowser.com'
+    apiBaseUrl: 'https://facetbrowser.com',
+    automation: defaultAutomation()
   }
+}
+
+export function defaultAutomation(): AutomationSettings {
+  return { enabled: false, port: 48123, token: newAutomationToken(), exposeCdp: false, remote: false }
+}
+
+export function newAutomationToken(): string {
+  return randomBytes(32).toString('hex')
+}
+
+// Nested objects are merged field by field, so a settings file written before
+// a field existed gets the default for just that field (and the generated
+// token is kept once it has been saved).
+function mergeSettings(saved?: Partial<Settings>): Settings {
+  const base = defaultSettings()
+  const merged: Settings = { ...base, ...(saved || {}) }
+  merged.automation = { ...base.automation, ...(saved?.automation || {}) }
+  if (!merged.automation.token) merged.automation.token = newAutomationToken()
+  return merged
 }
 
 function defaultCloud(): CloudState {
@@ -63,6 +84,8 @@ class Store extends EventEmitter {
     super()
     this.file = path.join(app.getPath('userData'), 'facetbrowser.json')
     this.data = this.load()
+    // Persist a token generated during load, so it is the same on the next start.
+    this.scheduleSave()
   }
 
   private load(): Data {
@@ -74,7 +97,7 @@ class Store extends EventEmitter {
           profiles: parsed.profiles || [],
           proxies: parsed.proxies || [],
           groups: parsed.groups || [],
-          settings: { ...defaultSettings(), ...(parsed.settings || {}) },
+          settings: mergeSettings(parsed.settings),
           cloud: { ...defaultCloud(), ...(parsed.cloud || {}) },
           extensions: parsed.extensions || []
         }
@@ -173,7 +196,9 @@ class Store extends EventEmitter {
   get settings(): Settings { return this.data.settings }
   setSettings(patch: Partial<Settings>): Settings {
     this.data.settings = { ...this.data.settings, ...patch }
+    if (patch.automation) this.data.settings.automation = { ...defaultAutomation(), ...this.data.settings.automation, ...patch.automation }
     this.scheduleSave()
+    this.emit('settings', this.data.settings)
     return this.data.settings
   }
 
@@ -193,8 +218,11 @@ class Store extends EventEmitter {
   // ---- cloud
   get cloud(): CloudState { return this.data.cloud }
   setCloud(patch: Partial<CloudState>): CloudState {
+    const before = this.data.cloud.session
     this.data.cloud = { ...this.data.cloud, ...patch }
     this.scheduleSave()
+    // Signed in / out / tokens refreshed: the relay follows the session.
+    if ('session' in patch && patch.session !== before) this.emit('cloud', this.data.cloud)
     return this.data.cloud
   }
   setCookieSync(profileId: string, v: { localAt: number; serverAt: number }): void {

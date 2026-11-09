@@ -138,6 +138,17 @@ export interface Settings {
   speedTestBytes: number
   language: 'tr' | 'en'
   apiBaseUrl: string
+  automation: AutomationSettings
+}
+
+// Local Automation API (REST + WebSocket on 127.0.0.1) that AI agents and
+// scripts use to drive profiles. Off by default; the token is generated once.
+export interface AutomationSettings {
+  enabled: boolean
+  port: number // 0 = random free port
+  token: string
+  exposeCdp: boolean // also open --remote-debugging-port=0 per profile and report cdpUrl
+  remote: boolean // dial out to facetbrowser.com so agents on other machines can reach this API (docs/automation.md, "Remote access")
 }
 
 export type RunState = 'starting' | 'running' | 'stopping'

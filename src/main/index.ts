@@ -6,6 +6,7 @@ import { launcher } from './browser/launcher'
 import { store } from './store'
 import { sync } from './cloud/sync'
 import { updater } from './updater'
+import { automationServer } from './automation/server'
 
 // Fixed data location regardless of how the app is started (packaged, `electron .`, or test harness).
 app.setPath('userData', process.env['FACETBROWSER_DATA_DIR'] || path.join(app.getPath('appData'), 'FacetBrowser'))
@@ -87,6 +88,9 @@ if (!gotLock) {
     createWindow()
     if (store().cloud.session) sync.start()
     updater.start(log)
+    // Local Automation API (REST + WS) for AI agents and scripts; off by default.
+    automationServer.on('status', (st) => log(`automation ${st.running ? 'listening on 127.0.0.1:' + st.port : 'stopped'}${st.error ? ' error=' + st.error : ''}${st.remote ? ' remote=connected device=' + st.remoteDeviceId : st.remoteError ? ' remote=' + st.remoteError : ''}`))
+    automationServer.apply(store().settings.automation).catch((e) => log(`automation start failed ${(e as Error).message}`))
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -101,9 +105,11 @@ app.on('before-quit', async (e) => {
   if (launcher.list().length) {
     e.preventDefault()
     await launcher.stopAll()
+    await automationServer.stop().catch(() => {})
     store().flush()
     app.exit(0)
   } else {
+    automationServer.stop().catch(() => {})
     store().flush()
   }
 })

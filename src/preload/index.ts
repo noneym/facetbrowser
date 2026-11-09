@@ -5,6 +5,7 @@ import type {
 } from '@shared/types'
 import type { EngineStatus, FeaturedExtension, InstalledExtension, UpdateStatus } from '@shared/types'
 import type { CloudStatus, ProviderAccount, ProviderBalance, ProviderCountry, ProviderGenerateOptions, ProviderPlan } from '@shared/cloud'
+import type { AutomationStatus } from '@shared/automation'
 
 type Listener<T> = (payload: T) => void
 function on<T>(channel: string, cb: Listener<T>): () => void {
@@ -113,6 +114,10 @@ const api = {
     countries: (id: string): Promise<ProviderCountry[]> => ipcRenderer.invoke('providers:countries', id),
     plans: (id: string): Promise<ProviderPlan[]> => ipcRenderer.invoke('providers:plans', id),
     generate: (id: string, opts: ProviderGenerateOptions, save: boolean): Promise<{ configs: ProxyConfig[]; saved: SavedProxy[] }> => ipcRenderer.invoke('providers:generate', id, opts, save)
+  },
+  automation: {
+    status: (): Promise<AutomationStatus> => ipcRenderer.invoke('automation:status'),
+    onStatus: (cb: Listener<AutomationStatus>) => on('automation:status', cb)
   },
   checker: {
     run: (lines: string[], opts: BatchCheckOptions): Promise<(ProxyCheckResult | null)[]> => ipcRenderer.invoke('checker:run', lines, opts),

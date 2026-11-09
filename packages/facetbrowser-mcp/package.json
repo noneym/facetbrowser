@@ -1,0 +1,16 @@
+{
+  "name": "facetbrowser-mcp",
+  "version": "0.2.0",
+  "description": "stdio MCP bridge to a running FacetBrowser (anti-detect multi-profile browser) on this machine or, through the facetbrowser.com relay, on another one",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "facetbrowser-mcp": "./index.js" },
+  "files": ["index.js", "README.md"],
+  "engines": { "node": ">=18" },
+  "keywords": ["mcp", "model-context-protocol", "facetbrowser", "browser-automation", "anti-detect"],
+  "homepage": "https://facetbrowser.com",
+  "repository": { "type": "git", "url": "https://github.com/noneym/facetbrowser.git", "directory": "packages/facetbrowser-mcp" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2"
+  }
+}
