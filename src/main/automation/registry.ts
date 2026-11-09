@@ -279,7 +279,7 @@ export const tools: ToolDef[] = [
     description: 'Console messages, uncaught page errors and dialogs recorded for a tab or a whole profile (ring buffer of the last 2000). Filter by level (log, warning, error, ...) or by seq with since.',
     inputSchema: obj({ profileId: str('Profile id; or pass tabId'), tabId: str('Tab id (limits to that tab)'), last: int('Max entries (default 100)'), level: str('console level: log, info, warning, error, debug'), since: int('Only events with seq greater than this'), types: { type: 'array', items: { type: 'string', enum: EVENT_TYPES }, description: 'Event types (default console, pageerror, dialog)' } }),
     rest: [{ method: 'GET', path: '/v1/tabs/{tabId}/console' }, { method: 'GET', path: '/v1/profiles/{profileId}/console' }],
-    handler: async (a) => ({ events: automation.consoleRead({ profileId: a.profileId, tabId: a.tabId }, { last: a.last, level: a.level, since: a.since, types: a.types }) })
+    handler: async (a) => ({ events: await automation.consoleRead({ profileId: a.profileId, tabId: a.tabId }, { last: a.last, level: a.level, since: a.since, types: a.types }) })
   },
   {
     name: 'facet_console_clear',

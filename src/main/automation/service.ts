@@ -37,7 +37,14 @@ interface TabEntry {
   cdp: CDPSession | null
   pendingDialog: Dialog | null
   lastScreenshotAt: number
+  // Console history is pulled on demand (see pullConsole); these track it.
+  consoleCdp: CDPSession | null
+  consoleSeen: Map<string, number> // key -> how many times already recorded
+  consoleCounts: Map<string, number> // key -> occurrences in the current replay
+  consolePull: Promise<void> | null
 }
+
+const CONSOLE_SEEN_MAX = 4000
 
 const EVALUATE_MAX = 1024 * 1024
 const SCREENSHOT_GAP_MS = 200
@@ -230,15 +237,18 @@ class AutomationService extends EventEmitter {
   private trackPage(profileId: string, page: Page): void {
     if (this.byPage.has(page)) return
     const tabId = newTabId()
-    const entry: TabEntry = { tabId, profileId, page, cdp: null, pendingDialog: null, lastScreenshotAt: 0 }
+    const entry: TabEntry = { tabId, profileId, page, cdp: null, pendingDialog: null, lastScreenshotAt: 0, consoleCdp: null, consoleSeen: new Map(), consoleCounts: new Map(), consolePull: null }
     this.tabs.set(tabId, entry)
     this.byPage.set(page, tabId)
     if (!this.active.has(profileId)) this.active.set(profileId, tabId)
     events.push(profileId, tabId, 'page', { url: mainUrl(page) })
 
+    // On the FacetBrowser engine only Log-domain entries ("Failed to load
+    // resource", CSP violations, deprecations) arrive live here; console.*
+    // calls and uncaught exceptions are pulled on demand, see pullConsole.
     page.on('console', (msg) => {
       const loc = msg.location()
-      events.push(profileId, tabId, 'console', { level: msg.type(), text: msg.text(), url: loc.url, line: loc.lineNumber, column: loc.columnNumber })
+      events.push(profileId, tabId, 'console', { level: msg.type(), text: msg.text(), url: loc.url, line: loc.lineNumber, column: loc.columnNumber, source: 'log' })
     })
     page.on('pageerror', (err) => events.push(profileId, tabId, 'pageerror', { message: err.message, stack: err.stack }))
     // With a dialog listener attached, Playwright leaves alert/confirm/prompt
@@ -290,8 +300,72 @@ class AutomationService extends EventEmitter {
       }
       entry.cdp?.detach().catch(() => {})
       entry.cdp = null
+      entry.consoleCdp?.detach().catch(() => {})
+      entry.consoleCdp = null
       events.push(profileId, tabId, 'close', { url: mainUrl(page) })
     })
+  }
+
+  // The FacetBrowser engine (fingerprint-chromium 148) does not emit live
+  // Runtime.consoleAPICalled / Runtime.exceptionThrown notifications, so
+  // Playwright's console and pageerror events never fire for page scripts
+  // (verified headed and headless). The engine still keeps V8's per-page
+  // console storage (last 1000 entries), and Runtime.enable replays it. So
+  // the history is pulled when asked for: toggle Runtime on a dedicated CDP
+  // session, collect the replay, and record only what was not seen before.
+  // The page cannot observe this (a getter on a logged object never runs),
+  // and nothing is injected.
+  private async pullConsole(t: TabEntry): Promise<void> {
+    if (t.consolePull) return t.consolePull
+    t.consolePull = (async () => {
+      if (t.page.isClosed()) return
+      if (!t.consoleCdp) {
+        const cdp = await this.requireContext(t.profileId).newCDPSession(t.page)
+        t.consoleCdp = cdp
+        // Same message logged twice in one millisecond: counted, not collapsed.
+        const seen = (key: string): boolean => {
+          const n = (t.consoleCounts.get(key) || 0) + 1
+          t.consoleCounts.set(key, n)
+          return n <= (t.consoleSeen.get(key) || 0)
+        }
+        cdp.on('Runtime.consoleAPICalled', (e: { type: string; args: Array<{ value?: unknown; description?: string; type: string }>; timestamp: number; stackTrace?: { callFrames: Array<{ url: string; lineNumber: number; columnNumber: number }> } }) => {
+          const text = e.args.map((a) => (a.value !== undefined ? (typeof a.value === 'string' ? a.value : JSON.stringify(a.value)) : a.description || a.type)).join(' ')
+          const frame = e.stackTrace?.callFrames[0]
+          const key = `${Math.round(e.timestamp)}|${e.type}|${text}`
+          if (seen(key)) return
+          events.push(t.profileId, t.tabId, 'console', { level: e.type, text, url: frame?.url, line: frame?.lineNumber, column: frame?.columnNumber, ts: Math.round(e.timestamp), source: 'console' })
+        })
+        cdp.on('Runtime.exceptionThrown', (e: { timestamp: number; exceptionDetails: { text: string; url?: string; lineNumber: number; columnNumber: number; exception?: { description?: string } } }) => {
+          const d = e.exceptionDetails
+          const description = d.exception?.description || d.text
+          const key = `${Math.round(e.timestamp)}|exception|${description}`
+          if (seen(key)) return
+          events.push(t.profileId, t.tabId, 'pageerror', { message: description.split('\n')[0], stack: description, url: d.url, line: d.lineNumber, column: d.columnNumber, ts: Math.round(e.timestamp) })
+        })
+      }
+      t.consoleCounts = new Map()
+      const counts = t.consoleCounts
+      await t.consoleCdp.send('Runtime.disable').catch(() => {})
+      await t.consoleCdp.send('Runtime.enable')
+      // Replayed events precede the enable response; one tick for the dispatch.
+      await new Promise((r) => setTimeout(r, 30))
+      for (const [k, n] of counts) t.consoleSeen.set(k, Math.max(n, t.consoleSeen.get(k) || 0))
+      if (t.consoleSeen.size > CONSOLE_SEEN_MAX) {
+        const drop = t.consoleSeen.size - CONSOLE_SEEN_MAX
+        let i = 0
+        for (const k of t.consoleSeen.keys()) {
+          if (i++ >= drop) break
+          t.consoleSeen.delete(k)
+        }
+      }
+    })().catch(() => {}).finally(() => (t.consolePull = null))
+    return t.consolePull
+  }
+
+  // Refreshes the console history of every open tab (the WS stream polls this
+  // while a client is subscribed to console events).
+  async pollConsole(): Promise<void> {
+    await Promise.all([...this.tabs.values()].filter((t) => !t.page.isClosed() && !mainUrl(t.page).startsWith('chrome://')).map((t) => this.pullConsole(t)))
   }
 
   private tabsOf(profileId: string): TabEntry[] {
@@ -589,17 +663,26 @@ class AutomationService extends EventEmitter {
 
   // ---- console / network ------------------------------------------------
 
-  consoleRead(scope: { profileId?: string; tabId?: string }, opts: { last?: number; level?: string; since?: number; types?: EventFilter['types'] } = {}): ReturnType<typeof events.list> {
+  async consoleRead(scope: { profileId?: string; tabId?: string }, opts: { last?: number; level?: string; since?: number; types?: EventFilter['types'] } = {}): Promise<ReturnType<typeof events.list>> {
     const { profileId, tabId } = this.scope(scope)
+    const targets = tabId ? [this.tabs.get(tabId)!] : this.tabsOf(profileId)
+    await Promise.all(targets.filter((t) => t && !t.page.isClosed()).map((t) => this.pullConsole(t)))
     const list = events.list(profileId, { tabId, since: opts.since, types: opts.types && opts.types.length ? opts.types : ['console', 'pageerror', 'dialog'] })
     const filtered = opts.level ? list.filter((e) => e.type !== 'console' || e.data.level === opts.level) : list
     const last = opts.last ?? 100
     return filtered.length > last ? filtered.slice(filtered.length - last) : filtered
   }
 
-  consoleClear(scope: { profileId?: string; tabId?: string }): { ok: true } {
-    const { profileId } = this.scope(scope)
+  async consoleClear(scope: { profileId?: string; tabId?: string }): Promise<{ ok: true }> {
+    const { profileId, tabId } = this.scope(scope)
     events.clear(profileId, ['console', 'pageerror', 'dialog'])
+    // Also drop the engine-side storage, so the next pull does not replay it.
+    const targets = tabId ? [this.tabs.get(tabId)!] : this.tabsOf(profileId)
+    for (const t of targets) {
+      if (!t || t.page.isClosed()) continue
+      t.consoleSeen.clear()
+      if (t.consoleCdp) await t.consoleCdp.send('Runtime.discardConsoleEntries').catch(() => {})
+    }
     return { ok: true }
   }
 

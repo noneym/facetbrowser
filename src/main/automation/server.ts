@@ -7,7 +7,7 @@ import { app } from 'electron'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { AutomationSettings } from '@shared/types'
 import type { AutomationEvent, AutomationEventType, AutomationStatus, DiscoveryFile } from '@shared/automation'
-import { AutomationError } from './service'
+import { AutomationError, automation } from './service'
 import { events } from './events'
 import { tools, matchRoute, knownPath, coerceArgs, validateArgs, openapi } from './registry'
 
@@ -20,6 +20,7 @@ import { tools, matchRoute, knownPath, coerceArgs, validateArgs, openapi } from 
 
 const BODY_LIMIT = 5 * 1024 * 1024
 const HEALTH_PATH = '/health'
+const CONSOLE_POLL_MS = 2000
 
 interface Client {
   ws: WebSocket
@@ -86,8 +87,9 @@ class AutomationServer extends EventEmitter {
           types: types ? new Set(types.split(',').map((t) => t.trim()).filter(Boolean) as AutomationEventType[]) : null
         }
         this.clients.add(client)
-        ws.on('close', () => this.clients.delete(client))
-        ws.on('error', () => this.clients.delete(client))
+        this.updateConsolePoll()
+        ws.on('close', () => { this.clients.delete(client); this.updateConsolePoll() })
+        ws.on('error', () => { this.clients.delete(client); this.updateConsolePoll() })
         ws.send(JSON.stringify({ type: 'hello', ts: Date.now(), profile: client.profile, types: client.types ? [...client.types] : null }))
       })
     })
@@ -120,6 +122,7 @@ class AutomationServer extends EventEmitter {
     this.server = null
     for (const c of this.clients) c.ws.close(1001, 'server stopping')
     this.clients.clear()
+    this.updateConsolePoll()
     this.wss?.close()
     this.wss = null
     this.port = null
@@ -180,6 +183,19 @@ class AutomationServer extends EventEmitter {
       if (!res.headersSent) json(res, err.status, { error: { code: err.code, message: err.message } })
       else res.end()
       if (err.code !== 'unauthorized' && err.code !== 'not_found') this.audit(toolName, ids, Date.now() - started, `${err.code}: ${err.message.split('\n')[0]}`)
+    }
+  }
+
+  // Console history on the engine is pull-based (see AutomationService.
+  // pullConsole); while a WS client wants console events, poll it so the
+  // stream stays near-live.
+  private consolePoll: NodeJS.Timeout | null = null
+  private updateConsolePoll(): void {
+    const wanted = [...this.clients].some((c) => !c.types || c.types.has('console') || c.types.has('pageerror'))
+    if (wanted && !this.consolePoll) this.consolePoll = setInterval(() => automation.pollConsole().catch(() => {}), CONSOLE_POLL_MS)
+    if (!wanted && this.consolePoll) {
+      clearInterval(this.consolePoll)
+      this.consolePoll = null
     }
   }
 
