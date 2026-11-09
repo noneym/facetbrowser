@@ -9,7 +9,7 @@ import { generateFingerprint, reseed } from './fingerprint/generator'
 import { COUNTRY_LOCALES, PROFILE_COLORS } from './fingerprint/data'
 import { launcher } from './browser/launcher'
 import { engine } from './browser/engine'
-import { checkProxy, pool, quickGeo } from './proxy/checker'
+import { checkProxy, pool } from './proxy/checker'
 import { parseProxyLine, parseProxyList } from './proxy/parse'
 import { cloud, CloudError } from './cloud/client'
 import { sync } from './cloud/sync'
@@ -18,54 +18,14 @@ import { updater } from './updater'
 import { extensions } from './extensions'
 import { FEATURED_EXTENSIONS } from '@shared/extensions'
 import type { ProviderAccount, ProviderGenerateOptions } from '@shared/cloud'
+import { automation, resolveProxy } from './automation/service'
+import { automationServer } from './automation/server'
 
 function win(): BrowserWindow | null {
   return BrowserWindow.getAllWindows()[0] || null
 }
 function send(channel: string, payload: unknown): void {
   win()?.webContents.send(channel, payload)
-}
-
-// Timezone, language and location follow the proxy's exit country. A proxy
-// that was never checked (or whose result is a day old) gets a one-request
-// geo lookup at launch; the result is kept on the saved proxy.
-const GEO_MAX_AGE_MS = 24 * 3600000
-async function freshProxyInfo(profile: Profile, config: ProxyConfig | null, known?: ProxyCheckResult): Promise<ProxyCheckResult | undefined> {
-  if (!config) return undefined
-  const usable = known && known.timezone && known.countryCode && Date.now() - known.checkedAt < GEO_MAX_AGE_MS
-  if (usable) return known
-  const geo = await quickGeo(config)
-  if (!geo) return known
-  const merged: ProxyCheckResult = { ...(known || {}), ...geo, checkedAt: known?.checkedAt && Date.now() - known.checkedAt < GEO_MAX_AGE_MS ? known.checkedAt : geo.checkedAt }
-  if (profile.proxy.mode === 'saved' && profile.proxy.savedId) {
-    const saved = store().getProxy(profile.proxy.savedId)
-    if (saved) store().upsertProxy({ ...saved, lastCheck: merged })
-  }
-  return merged
-}
-
-// localeMode 'auto' (the default): locale and languages are set from the
-// proxy country before launch and persisted so the editor shows them.
-function applyProxyLocale(profile: Profile, info?: ProxyCheckResult): void {
-  const fp = profile.fingerprint
-  if (fp.localeMode === 'manual' || !info?.countryCode) return
-  // Unknown country: English is a safer default than the host's own locale.
-  const loc = COUNTRY_LOCALES[info.countryCode] || COUNTRY_LOCALES['US']
-  if (fp.locale === loc.locale && JSON.stringify(fp.languages) === JSON.stringify(loc.languages)) return
-  fp.locale = loc.locale
-  fp.languages = loc.languages
-  store().upsertProfile(profile, { keepUpdatedAt: true })
-}
-
-function resolveProxy(profile: Profile): { config: ProxyConfig | null; info?: ProxyCheckResult } {
-  const s = store()
-  if (profile.proxy.mode === 'saved' && profile.proxy.savedId) {
-    const p = s.getProxy(profile.proxy.savedId)
-    if (!p) return { config: null }
-    return { config: { protocol: p.protocol, host: p.host, port: p.port, username: p.username, password: p.password }, info: p.lastCheck }
-  }
-  if (profile.proxy.mode === 'custom' && profile.proxy.custom) return { config: profile.proxy.custom }
-  return { config: null }
 }
 
 // The engine reports the host screen, so the profile records the real
@@ -159,6 +119,12 @@ export function registerIpc(): void {
   // ---- settings ---------------------------------------------------------
   ipcMain.handle('settings:get', () => s.settings)
   ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => s.setSettings(patch))
+
+  // ---- automation API ---------------------------------------------------
+  // The local REST/WS server follows the setting: saved → applied.
+  s.on('settings', (st: Settings) => automationServer.apply(st.automation).catch(() => {}))
+  automationServer.on('status', (st) => send('automation:status', st))
+  ipcMain.handle('automation:status', () => automationServer.status())
 
   // ---- groups -----------------------------------------------------------
   ipcMain.handle('groups:list', () => s.groups)
@@ -275,38 +241,9 @@ export function registerIpc(): void {
   })
   ipcMain.handle('browser:list', () => launcher.list())
   sync.on('remoteStop', (id: string) => send('browser:remoteStopped', id))
-  // force: the profile is open on another device and the user chose "Force
-  // stop"; wait for that device to close it and upload its session first.
-  ipcMain.handle('browser:launch', async (_e, id: string, force?: boolean) => {
-    if (!s.getProfile(id)) throw new Error('Profile not found')
-    const gate = sync.licenseGate()
-    if (!gate.ok) throw new Error(gate.reason)
-    if (!launcher.isRunning(id)) {
-      if (force) await sync.takeOver(id)
-      else await sync.claim(id)
-      // Pull the profile as the last device left it (its open tabs, edits
-      // made on the phone) instead of waiting for the next periodic sync.
-      await sync.runNow()
-    }
-    const p = s.getProfile(id)
-    if (!p) throw new Error('Profile not found')
-    await sync.pullCookiesIfNewer(id).catch(() => {})
-    extensions.applyShares(p)
-    try {
-      const { config, info: known } = resolveProxy(p)
-      const info = await freshProxyInfo(p, config, known)
-      applyProxyLocale(p, info)
-      await launcher.launch({ profile: p, proxy: config, proxyInfo: info, settings: s.settings, extensionDirs: extensions.dirsFor(p) })
-    } catch (e) {
-      if (!launcher.isRunning(id)) await sync.releaseLock(id)
-      throw e
-    }
-    p.launchCount = (p.launchCount || 0) + 1
-    p.lastLaunchedAt = Date.now()
-    s.upsertProfile(p)
-    return p
-  })
-  ipcMain.handle('browser:stop', (_e, id: string) => launcher.stop(id))
+  // Launch and stop live in the automation service, shared with the REST API.
+  ipcMain.handle('browser:launch', (_e, id: string, force?: boolean) => automation.launchProfile(id, force))
+  ipcMain.handle('browser:stop', (_e, id: string) => automation.stopProfile(id))
 
   // ---- extensions ------------------------------------------------------
   ipcMain.handle('extensions:list', () => extensions.list())

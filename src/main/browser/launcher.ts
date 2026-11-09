@@ -18,6 +18,7 @@ interface Running {
   ready?: boolean // start tabs are open; from here on, no tabs left means the user closed the browser
   emptyTimer?: NodeJS.Timeout | null
   watchTimer?: NodeJS.Timeout | null
+  cdpUrl?: string // ws://127.0.0.1:<port>/devtools/browser/<guid>, only with exposeCdp
 }
 
 const MAX_TABS = 50
@@ -47,6 +48,10 @@ export interface LaunchInput {
   proxyInfo?: ProxyCheckResult
   settings: Settings
   extensionDirs?: string[] // Web Store extensions resolved by the caller
+  // Also open a localhost DevTools port (Settings > Automation > expose CDP)
+  // so chrome-devtools-mcp / Puppeteer / connectOverCDP can attach directly.
+  // Verified to work next to --remote-debugging-pipe on the 148 engine.
+  exposeCdp?: boolean
 }
 
 // Chrome derives Accept-Language and navigator.languages from this pref.
@@ -147,6 +152,15 @@ class Launcher extends EventEmitter {
     return [...(this.running.get(id)?.tabSnapshot || [])]
   }
 
+  cdpUrlOf(id: string): string | undefined {
+    return this.running.get(id)?.cdpUrl
+  }
+
+  pagesOf(id: string): Page[] {
+    const ctx = this.contextOf(id)
+    return ctx ? safePageList(ctx) : []
+  }
+
   private emitStatus(): void {
     this.emit('status', this.list())
   }
@@ -198,6 +212,7 @@ class Launcher extends EventEmitter {
         `--window-size=${Math.min(fp.screen.width, 1600)},${Math.min(fp.screen.height, 1000)}`,
         ...engineArgs(profile, timezoneId)
       ]
+      if (input.exposeCdp) args.push('--remote-debugging-port=0')
       if (bridge) {
         args.push(`--proxy-server=http://127.0.0.1:${bridge.port}`)
         args.push('--proxy-bypass-list=<-loopback>')
@@ -246,6 +261,8 @@ class Launcher extends EventEmitter {
       const track = (page: Page): void => {
         const url = page.url()
         if (url) entry.tabs.set(page, url)
+        // The automation service keys its tab registry and event capture off this.
+        this.emit('page', profile.id, page)
         page.on('framenavigated', (f) => {
           if (f.parentFrame()) return
           entry.tabs.set(page, f.url())
@@ -276,6 +293,7 @@ class Launcher extends EventEmitter {
       }
       context.pages().forEach(track)
       context.on('page', track)
+      if (input.exposeCdp) entry.cdpUrl = await readDevToolsPort(dir)
 
       if (!context.pages().length) await context.waitForEvent('page', { timeout: 5000 }).catch(() => null)
       await restoreDownloads(context)
@@ -525,6 +543,23 @@ async function ensureSearchEngine(ctx: BrowserContext, userDataDir: string): Pro
   } finally {
     await page?.close().catch(() => {})
   }
+}
+
+// Chromium writes "<port>\n/devtools/browser/<guid>" once the DevTools HTTP
+// endpoint listens; with --remote-debugging-port=0 that is the only way to
+// learn the port. Bound to 127.0.0.1 by Chromium itself.
+async function readDevToolsPort(userDataDir: string): Promise<string | undefined> {
+  const file = path.join(userDataDir, 'DevToolsActivePort')
+  for (let i = 0; i < 20; i++) {
+    try {
+      const [port, p] = fs.readFileSync(file, 'utf8').trim().split(/\r?\n/)
+      if (port && p) return `ws://127.0.0.1:${port}${p}`
+    } catch {
+      /* not written yet */
+    }
+    await new Promise((r) => setTimeout(r, 150))
+  }
+  return undefined
 }
 
 function safePageList(ctx: BrowserContext): Page[] {
