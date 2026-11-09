@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Plus, Trash, ArrowsClockwise, Lightning } from '@phosphor-icons/react'
 import type { ProviderAccount, ProviderBalance, ProviderCountry, ProviderId, ProviderPlan } from '@shared/cloud'
 import type { SavedProxy } from '@shared/types'
@@ -78,7 +78,7 @@ export function ProvidersDialog({ open, onClose }: { open: boolean; onClose: () 
                   <div className="mt-2 text-[12px]">
                     {bal === 'loading' || !bal ? <span className="flex items-center gap-1.5 text-fg-faint"><Spinner className="h-3 w-3" /> {t('prov.balance')}</span>
                       : !bal.ok ? <span className="text-bad">{bal.error}</span>
-                      : <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">{bal.lines.map((l) => <><span key={l.label + 'k'} className="text-fg-muted">{l.label}</span><span key={l.label + 'v'} className="font-mono text-fg">{l.value}</span></>)}</div>}
+                      : <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">{bal.lines.map((l, i) => <Fragment key={`${i}-${l.label}`}><span className="text-fg-muted">{l.label}</span><span className="font-mono text-fg">{l.value}</span></Fragment>)}</div>}
                   </div>
                 </li>
               )
@@ -166,9 +166,18 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
     }).catch(() => undefined)
     setPlans([])
     setCountries([])
-    window.api.providers.countries(acc.id).then(setCountries).catch(() => setCountries([]))
+    // Generate providers (GonzoProxy, 2Captcha) list the countries they
+    // serve; keep the picked code valid once that list arrives.
+    window.api.providers.countries(acc.id).then((cs) => {
+      setCountries(cs)
+      setCountry((c) => (c && cs.length && !cs.some((x) => x.code === c) ? cs[0].code : c))
+    }).catch(() => setCountries([]))
   }, [acc])
   const owned = importMode && pool === 'owned'
+  // Owned pool: only the countries the account has static proxies in.
+  // Rotating gateway plans take any country; generate providers use their
+  // own list, with the full ISO list as a fallback while it loads or fails.
+  const countryList = owned ? countries : importMode || !countries.length ? allCountries() : countries
   const pickPool = (v: 'owned' | 'rotating'): void => {
     setPool(v)
     setCountry('')
@@ -211,14 +220,10 @@ export function GenerateDialog({ acc, onClose, onGenerated, single }: { acc: Pro
           <Segmented<'http' | 'socks5'> value={protocol} onChange={setProtocol} options={[{ id: 'http', label: 'HTTP' }, { id: 'socks5', label: 'SOCKS5' }]} />
         </Field>
         <Field label={t('prov.country')}>
-          {(countries.length && owned) || (importMode && !owned) ? (
-            <Select value={country} onChange={(e) => setCountry(e.target.value)}>
-              <option value="">{t('prov.anyCountry')}</option>
-              {(owned ? countries : allCountries()).map((c) => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
-            </Select>
-          ) : (
-            <Input value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} placeholder={owned || !importMode ? 'US' : t('prov.anyCountry')} className="w-28 font-mono" maxLength={2} />
-          )}
+          <Select value={country} onChange={(e) => setCountry(e.target.value)}>
+            {importMode && <option value="">{t('prov.anyCountry')}</option>}
+            {countryList.map((c) => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
+          </Select>
         </Field>
         {!single && (owned || !importMode || sticky) && <Field label={t('prov.count')}><Input type="number" min={1} max={100} value={count} onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} className="w-28 font-mono" /></Field>}
         {!owned && <Toggle checked={sticky} onChange={setSticky} label={sticky ? t('prov.sticky') : t('prov.rotating')} />}
