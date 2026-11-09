@@ -382,6 +382,11 @@ class AutomationService extends EventEmitter {
     return this.byPage.get(page)
   }
 
+  hasTab(tabId: string): boolean {
+    const t = this.tabs.get(tabId)
+    return !!t && !t.page.isClosed()
+  }
+
   async listTabs(profileId: string): Promise<TabInfo[]> {
     const p = this.resolveProfile(profileId)
     this.requireContext(p.id)

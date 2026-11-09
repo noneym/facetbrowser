@@ -10,6 +10,7 @@ import type { AutomationEvent, AutomationEventType, AutomationStatus, DiscoveryF
 import { AutomationError, automation } from './service'
 import { events } from './events'
 import { tools, matchRoute, knownPath, coerceArgs, validateArgs, openapi } from './registry'
+import { mcpHost } from './mcp'
 
 // HTTP + WebSocket front for the AutomationService. Bound to 127.0.0.1 only;
 // every request needs `Authorization: Bearer <token>`; requests that carry an
@@ -41,6 +42,7 @@ class AutomationServer extends EventEmitter {
   constructor() {
     super()
     events.on('event', (ev: AutomationEvent) => this.broadcast(ev))
+    mcpHost.configure({ audit: (tool, ids, ms, error) => this.audit(`mcp:${tool}`, ids, ms, error), version: app.getVersion() })
   }
 
   get discoveryFile(): string {
@@ -120,6 +122,7 @@ class AutomationServer extends EventEmitter {
   async stop(): Promise<void> {
     const server = this.server
     this.server = null
+    await mcpHost.closeAll().catch(() => {})
     for (const c of this.clients) c.ws.close(1001, 'server stopping')
     this.clients.clear()
     this.updateConsolePoll()
@@ -157,6 +160,11 @@ class AutomationServer extends EventEmitter {
       if (!this.authorized(bearerOf(req.headers.authorization))) {
         res.setHeader('WWW-Authenticate', 'Bearer realm="FacetBrowser Automation"')
         throw new AutomationError('unauthorized', 'Missing or wrong bearer token (Settings > Automation, or automation.json)', 401)
+      }
+      // MCP (Streamable HTTP): the SDK transport reads the body and answers itself.
+      if (url.pathname === '/mcp') {
+        await mcpHost.handle(req, res)
+        return
       }
       if (url.pathname === '/openapi.json' && method === 'GET') return json(res, 200, openapi(this.port || 0, app.getVersion()))
       if (url.pathname === '/v1/tools' && method === 'GET') return json(res, 200, { tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, rest: t.rest })) })
