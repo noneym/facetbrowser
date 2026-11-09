@@ -1,7 +1,7 @@
 {
   "name": "facetbrowser-mcp",
-  "version": "0.1.0",
-  "description": "stdio MCP bridge to a running FacetBrowser (anti-detect multi-profile browser) on this machine",
+  "version": "0.2.0",
+  "description": "stdio MCP bridge to a running FacetBrowser (anti-detect multi-profile browser) on this machine or, through the facetbrowser.com relay, on another one",
   "license": "MIT",
   "type": "module",
   "bin": { "facetbrowser-mcp": "./index.js" },
