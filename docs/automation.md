@@ -7,7 +7,7 @@ refs, click/type/fill, JavaScript, console and network history, screenshots,
 cookies and raw Chrome DevTools Protocol. Design and roadmap:
 [`mcp-automation-plan.md`](mcp-automation-plan.md).
 
-Status: Faz 1 (service layer, REST, WebSocket). The MCP server (Faz 2) is next.
+Status: Faz 1 (service layer, REST, WebSocket) and Faz 2 (MCP server + stdio bridge) are done. Remote access through facetbrowser.com is planned (plan §10).
 
 ## Enable
 
@@ -30,6 +30,48 @@ copy-paste:
 The file is removed when the server stops or the app quits normally. After a
 crash or a forced kill a stale file can remain: treat it as valid only when
 `pid` is alive and `GET /health` answers.
+
+## Connect an AI agent (MCP)
+
+The same server speaks MCP (Streamable HTTP) at `http://127.0.0.1:48123/mcp`
+with the same Bearer token. 38 tools (`facet_*`), resources (`facet://profiles`,
+`facet://profile/{id}/tabs|console|network`) and console/page errors as MCP log
+notifications.
+
+**Claude Code**
+
+```bash
+claude mcp add --transport http facetbrowser http://127.0.0.1:48123/mcp --header "Authorization: Bearer <token>"
+```
+
+**Cursor** (`.cursor/mcp.json`):
+
+```json
+{ "mcpServers": { "facetbrowser": { "url": "http://127.0.0.1:48123/mcp", "headers": { "Authorization": "Bearer <token>" } } } }
+```
+
+**Claude Desktop** only speaks stdio, so it goes through the
+[`facetbrowser-mcp`](../packages/facetbrowser-mcp) bridge, which reads port and
+token from `automation.json` by itself:
+
+```json
+{ "mcpServers": { "facetbrowser": { "command": "npx", "args": ["-y", "facetbrowser-mcp"] } } }
+```
+
+Until the package is published on npm, point `command` at `node` and `args` at
+the checked-out `packages/facetbrowser-mcp/index.js`.
+
+Session context: `facet_select_profile` / `facet_select_tab` make a profile and
+tab the default, after which `tabId` / `profileId` can be omitted;
+`facet_launch_profile` and `facet_new_tab` select what they created.
+`facet_session_info` shows the selection. Each MCP session (one per client
+connection) has its own context.
+
+**Remote machine?** Not yet. The API is local by design; for now use an SSH
+tunnel (`ssh -L 48123:127.0.0.1:48123 home-pc`) and set
+`FACETBROWSER_MCP_URL` / `FACETBROWSER_TOKEN` for the bridge. A relay through
+facetbrowser.com (outbound connection from the app, scoped relay tokens) is
+planned in the plan document, §10.
 
 ## Rules
 
@@ -201,6 +243,7 @@ ws.on('message', (m) => console.log(JSON.parse(m)))
 
 ## Reference
 
+- `POST/GET/DELETE /mcp` — MCP Streamable HTTP endpoint (same token).
 - `GET /openapi.json` — OpenAPI 3.1 for every route (generated from the tool
   registry, so it is always current).
 - `GET /v1/tools` — the same capabilities as MCP-style tool definitions

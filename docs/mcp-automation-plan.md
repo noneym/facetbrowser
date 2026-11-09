@@ -6,7 +6,7 @@ navigasyon, DOM okuma/tıklama/yazma, JavaScript çalıştırma, console ve netw
 izleme, ekran görüntüsü, cookie/storage, ve ihtiyaç duyan ajanlar için ham CDP
 (Chrome DevTools Protocol) erişimi.
 
-Durum: Faz 0 ve Faz 1 tamam (bkz. `docs/automation.md`); sırada Faz 2 (MCP sunucusu). Tahmini efor: 4 faz, toplam 8-12 iş günü.
+Durum: Faz 0, 1 ve 2 tamam (bkz. `docs/automation.md`); sırada Faz 3. Uzak erişim (relay) planı §10'da. Tahmini efor: 4 faz, toplam 8-12 iş günü.
 
 ---
 
@@ -301,7 +301,7 @@ defterinde (`registry.ts`) tutulur; MCP `tools/list`, REST router ve
   `facet_tab_info` çekirdeğe erken alındı; `GET /v1/tools` araç tanımlarını
   MCP biçiminde verir.
 
-**Faz 2 — MCP sunucusu (2-3 gün)**
+**Faz 2 — MCP sunucusu (2-3 gün) — tamamlandı (2026-11-09)**
 - `mcp.ts` Streamable HTTP; çekirdek 20 araç; resources; console notification.
 - Claude Code ile uçtan uca dene:
   `claude mcp add --transport http facetbrowser http://127.0.0.1:48123/mcp --header "Authorization: Bearer …"`.
@@ -327,7 +327,7 @@ defterinde (`registry.ts`) tutulur; MCP `tools/list`, REST router ve
 1. **Plan kapısı:** Automation API tüm planlarda mı, yalnızca `unlimited` mı? (Cloud gate ile kolay; ürün kararı.)
 2. **Port vs. pipe-köprü:** Faz 0 testi sonucuna göre.
 3. **npm paket adı:** `facetbrowser-mcp` müsait mi; değilse `@facetbrowser/mcp`.
-4. **Facet Lite (web) ile ilişki:** API yalnızca masaüstünde çalışan profilleri sürer. İleride cloud üzerinden uzak makinedeki FacetBrowser'a köprü isteniyorsa ayrı bir relay tasarımı gerekir; bu planın dışında.
+4. **Facet Lite (web) ile ilişki:** API yalnızca masaüstünde çalışan profilleri sürer. Uzak makinedeki FacetBrowser'a cloud üzerinden köprü için relay tasarımı §10'da (Faz 5 olarak planlandı).
 5. **Init script enjeksiyonu** gerçekten gerekli mi, yoksa kullanıcı anahtarıyla açılan CDP `Page.addScriptToEvaluateOnNewDocument` yeterli mi? Öneri: tek anahtar, CDP yolu; ayrı araç yazma.
 
 ---
@@ -347,3 +347,105 @@ src/renderer/src/pages/SettingsPage.tsx   "Automation" bölümü (enable, port, 
 packages/facetbrowser-mcp/                stdio köprüsü (ayrı package.json, tsup ile build)
 docs/automation.md                        kullanıcı dokümanı (Claude Code / Cursor / Desktop örnekleri)
 ```
+
+---
+
+## 10. Uzak erişim: facetbrowser.com relay (Faz 5, planlandı)
+
+İhtiyaç: kullanıcının FacetBrowser'ı ev/ofis bilgisayarında açık; ajan başka bir
+makinede (dizüstü, sunucu, Claude Code cloud oturumu, Cursor web) çalışıyor ve bu
+profilleri sürmek istiyor. Uygulama LAN'a ya da internete port açmaz; bunun
+yerine kendisi facetbrowser.com'a dışa doğru bir WebSocket bağlar ve ajan
+relay'e bağlanır. Bu sayede NAT/firewall sorunu yok, uygulama tarafı hiçbir
+gelen bağlantı kabul etmez.
+
+### 10.1 Mimari
+
+```
+┌──────────────┐  MCP over HTTPS   ┌──────────────────────────────┐  WSS (outbound)  ┌─────────────────┐
+│ Ajan (uzak)  │──────────────────►│ facetbrowser.com /relay      │◄─────────────────│ FacetBrowser    │
+│ Claude Code  │  Bearer relayTok  │ Fastify + Redis pub/sub      │  account session │ (ev PC)         │
+└──────────────┘                   │ device <-> agent eşleme      │                  │ local /mcp      │
+                                   └──────────────────────────────┘                  └─────────────────┘
+```
+
+- **Cihaz tarafı (masaüstü):** `src/main/automation/relay.ts`. Settings >
+  Automation > "Uzak erişime izin ver (facetbrowser.com üzerinden)" anahtarı.
+  Açıkken uygulama `wss://facetbrowser.com/api/relay/device` adresine mevcut
+  hesap oturumuyla (accessToken + deviceId) bağlanır; kopunca üstel geri çekilme
+  ile yeniden bağlanır. Gelen her çerçeve `{ id, method, path, headers, body }`
+  biçiminde bir HTTP isteği tarifidir; uygulama bunu **yerel** `127.0.0.1:<port>`
+  sunucusuna (REST ya da `/mcp`) kendi token'ıyla iletir ve yanıtı
+  `{ id, status, headers, body }` olarak geri yollar. SSE/stream yanıtlar
+  parça parça (`{ id, chunk }` … `{ id, end }`) taşınır; WS `/events` akışı da
+  aynı yolla tünellenir. Böylece relay hiçbir araç mantığı bilmez; yerel API'nin
+  birebir aynası olur.
+- **Sunucu tarafı (facetbrowser-web):** `server/routes/relay.ts`.
+  - `GET /api/relay/device` (WS): cihaz bağlantısı; `requireVerified` + plan
+    kontrolü. Redis: `relay:dev:<userId>:<deviceId>` → sunucu örneği kimliği
+    (çoklu örnek için pub/sub kanalı `relay:<deviceId>`).
+  - `POST/GET/DELETE /api/relay/:deviceId/mcp` ve `ANY /api/relay/:deviceId/v1/*`:
+    ajan tarafı. `Authorization: Bearer <relayToken>`. İstek çerçeveye çevrilir,
+    cihaza yollanır, yanıt beklenir (zaman aşımı 120 sn; screenshot/evaluate
+    için yeterli). `Mcp-Session-Id` başlığı aynen geçer; oturum durumu cihazda
+    tutulduğu için relay durumsuzdur.
+  - `GET /api/relay/devices`: hesabın çevrimiçi cihazları (ad, platform, son
+    görülme, çalışan profil sayısı) — ajan `facetbrowser-mcp --remote` ile ya da
+    web hesap sayfasında görür.
+  - **Relay token'ları:** hesap sayfasında üretilir (`relay_tokens` tablosu:
+    id, user_id, name, hash, device_id (opsiyonel kısıt), profile_scope
+    (opsiyonel grup/profil listesi), expires_at, last_used_at). Hesap şifresi ya
+    da erişim token'ı ajanlara verilmez; relay token iptal edilebilir ve
+    kapsamlanabilir. Token hash'lenerek saklanır, yalnızca üretimde bir kez
+    gösterilir.
+  - Hız sınırı: token başına 600 istek/dk, eşzamanlı 8 istek; gövde 5 MB
+    (screenshot base64 ~1 MB). Rate limit mevcut `@fastify/rate-limit` + Redis.
+  - Mevcut altyapıya uyum: Fastify 5 + `@fastify/websocket` (yeni bağımlılık),
+    Redis zaten var (running lock'lar için), MySQL `devices` tablosu zaten var.
+- **Ajan tarafı:**
+  - Claude Code / Cursor: `claude mcp add --transport http facet-home
+    https://facetbrowser.com/api/relay/<deviceId>/mcp --header "Authorization: Bearer <relayToken>"`.
+  - Claude Desktop: `npx facetbrowser-mcp --remote <deviceId>` ya da
+    `FACETBROWSER_MCP_URL=https://facetbrowser.com/api/relay/<deviceId>/mcp
+    FACETBROWSER_TOKEN=<relayToken>` (köprü bugün bu iki env değişkenini zaten
+    destekliyor; `--remote` cihaz listesini çekip seçtirir).
+
+### 10.2 Güvenlik
+
+- Cihaz yalnızca dışa bağlanır; gelen port yok. Kapalıyken relay'e hiç bağlanmaz
+  (varsayılan kapalı).
+- Relay token ≠ hesap oturumu. Token ile yalnızca relay uçları kullanılabilir;
+  sync/billing/hesap uçları kapalı. Cihaz ve profil kapsamı seçilebilir
+  (§6'daki "profil kapsamı" maddesiyle aynı mekanizma, cihazda uygulanır: relay
+  çerçevesi `scope` taşır, cihaz `facet_list_profiles` çıktısını ve id
+  erişimlerini bu kapsama göre süzer).
+- Cihazda ikinci bir kapı: uygulama ilk uzak istekte (ya da her yeni relay
+  token'ında) bir kez bildirim gösterir: "X ajanı bu bilgisayardaki profilleri
+  uzaktan sürüyor" + "Kes" düğmesi. Üst bardaki "API on" rozeti uzak bağlantı
+  varken "Remote" olur.
+- İçerik gizliliği: relay istek/yanıt gövdelerini loglamaz; yalnızca
+  `{ ts, userId, deviceId, tokenId, method, path, status, ms }` satırı tutar
+  (hesap sayfasında "Uzak erişim günlüğü"). Screenshot ve sayfa içerikleri
+  sunucuda saklanmaz. Uçtan uca şifreleme ilk sürümde yok (TLS ile sunucuya
+  kadar); istenirse cihaz-ajan arasında paylaşılan anahtarla gövde şifreleme
+  sonraki adım.
+- Plan kapısı: relay yalnızca `unlimited` planda (ürün kararı; teknik olarak
+  `requireVerified` + plan kontrolü tek satır).
+
+### 10.3 Yerel yol değişmez
+
+Yerel kullanım (aynı makine, SSH tüneli) bugünkü gibi relay'siz çalışır.
+Relay, yerel sunucunun önüne eklenen bir aynadır; araçlar, şemalar ve belgeler
+tek kaynaktan (registry) gelmeye devam eder.
+
+### 10.4 İş kalemleri (tahmin 3-4 gün)
+
+1. web: `@fastify/websocket`, `relay.ts` (device WS, agent HTTP uçları, pub/sub,
+   zaman aşımı, hız sınırı), `relay_tokens` tablosu + hesap sayfası UI (üret,
+   adlandır, kapsam, iptal, günlük), cihaz listesi ucu. Compare sayfasına satır.
+2. masaüstü: `relay.ts` (bağlan/yeniden bağlan, çerçeve → yerel HTTP, stream
+   taşıma), Settings anahtarı + durum, bildirim ve rozet, kapsam süzme.
+3. köprü: `facetbrowser-mcp --remote` (cihaz seçimi, token'ı OS keychain'de
+   saklama opsiyonel).
+4. docs/automation.md "Uzak erişim" bölümü; yük/tutarlılık testi (uzun
+   evaluate, screenshot, kopan bağlantıda oturumun hayatta kalması).
