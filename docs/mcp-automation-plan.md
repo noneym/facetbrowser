@@ -6,7 +6,7 @@ navigasyon, DOM okuma/tıklama/yazma, JavaScript çalıştırma, console ve netw
 izleme, ekran görüntüsü, cookie/storage, ve ihtiyaç duyan ajanlar için ham CDP
 (Chrome DevTools Protocol) erişimi.
 
-Durum: Faz 0 tamam, Faz 1 uygulanıyor (bkz. `docs/automation.md`). Tahmini efor: 4 faz, toplam 8-12 iş günü.
+Durum: Faz 0 ve Faz 1 tamam (bkz. `docs/automation.md`); sırada Faz 2 (MCP sunucusu). Tahmini efor: 4 faz, toplam 8-12 iş günü.
 
 ---
 
@@ -76,6 +76,17 @@ Tek giriş noktası. IPC'den de HTTP'den de çağrılır. Sorumluluklar:
   ile birleştirilir.
 - Olay yayını: `console`, `pageerror`, `request`/`response`/`requestfailed`,
   `dialog`, `download`, `framenavigated`, `page` (yeni sekme), `close`.
+  **Faz 1 bulgusu:** fingerprint-chromium 148 canlı `Runtime.consoleAPICalled`
+  ve `Runtime.exceptionThrown` bildirimi göndermiyor (headed/headless, Playwright
+  dinleyicisi ve ham CDP oturumuyla doğrulandı); Playwright `console`/`pageerror`
+  olayları sayfa script'leri için hiç tetiklenmiyor. Motor V8'in sayfa başına
+  console deposunu (son 1000 kayıt) tutuyor ve `Runtime.enable` bunu yeniden
+  oynatıyor. Bu yüzden `console_read` çekme (pull) modelinde: sekme başına ayrı
+  bir CDP oturumunda Runtime kapatılıp açılır, replay toplanır, daha önce
+  görülmeyenler ring buffer'a yazılır; WS akışı console aboneleri varken 2 sn'de
+  bir çeker. Sayfa bunu gözlemleyemiyor (loglanan nesnenin getter'ı çalışmıyor),
+  enjeksiyon yok. `Log.entryAdded` kaynaklı kayıtlar (kaynak yüklenemedi, CSP)
+  canlı gelmeye devam ediyor.
   Her olay `{ profileId, tabId, type, ts, data }` şeklinde bir EventEmitter'a
   düşer; WS ve MCP notifications buradan beslenir. Son N olay (örn. 2000)
   profil başına ring buffer'da tutulur, böylece ajan "son 50 console hatasını
@@ -266,7 +277,7 @@ defterinde (`registry.ts`) tutulur; MCP `tools/list`, REST router ve
 
 ## 7. Uygulama fazları
 
-**Faz 0 — Keşif (0.5 gün)**
+**Faz 0 — Keşif (0.5 gün) — tamamlandı (2026-11-09)**
 - fingerprint-chromium'da pipe + port birlikte test et (§3.5).
 - `ariaSnapshot()` çıktısına ref ekleyen küçük prototip; Playwright 1.64'te
   ref üreten hazır bir seçenek var mı kontrol et.
@@ -277,13 +288,18 @@ defterinde (`registry.ts`) tutulur; MCP `tools/list`, REST router ve
   `externalizeDepsPlugin` ile main bundle dışında kalır, electron-builder
   ASAR'a dahil eder.
 
-**Faz 1 — Servis katmanı + REST (2-3 gün)**
+**Faz 1 — Servis katmanı + REST (2-3 gün) — tamamlandı (2026-11-09)**
 - `src/main/automation/{service,registry,server,events}.ts`. `browser:*` IPC
   handler'larını servise taşı; `launcher.ts`'deki tab takibini `tabId` ile
   genişlet. Event ring buffer. REST + WS. Settings'e `automation: { enabled,
   port, token, exposeCdp, allowInitScript, allowedUploadDirs }` alanı +
   Settings sayfası bölümü (i18n TR/EN). `automation.json` discovery dosyası.
 - Test: `curl` ile profil aç, navigate, evaluate, screenshot.
+- Not: `allowInitScript` ve `allowedUploadDirs` ayarları Faz 3'e bırakıldı
+  (araçları da orada); Faz 1 ayarı `{ enabled, port, token, exposeCdp }`.
+  `@modelcontextprotocol/sdk` Faz 2'de eklenecek. `facet_handle_dialog` ve
+  `facet_tab_info` çekirdeğe erken alındı; `GET /v1/tools` araç tanımlarını
+  MCP biçiminde verir.
 
 **Faz 2 — MCP sunucusu (2-3 gün)**
 - `mcp.ts` Streamable HTTP; çekirdek 20 araç; resources; console notification.
