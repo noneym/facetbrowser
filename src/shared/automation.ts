@@ -26,6 +26,11 @@ export interface AutomationStatus {
   port: number | null
   error: string | null
   discoveryFile: string
+  // Remote access relay (Settings > Automation > remote): connected to
+  // facetbrowser.com and reachable by agents elsewhere.
+  remote: boolean
+  remoteError: string | null
+  remoteDeviceId: string | null
 }
 
 export interface TabInfo {

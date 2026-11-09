@@ -150,6 +150,22 @@ function AutomationSection({ draft, set }: { draft: Settings; set: <K extends ke
         </Field>
       </div>
       <Toggle checked={a.exposeCdp} onChange={(v) => patch({ exposeCdp: v })} label={t('settings.automationExposeCdp')} hint={t('settings.automationExposeCdpHint')} />
+      <Toggle checked={!!a.remote} onChange={(v) => patch({ remote: v })} label={t('settings.automationRemote')} hint={t('settings.automationRemoteHint')} />
+      {saved.automation.remote && saved.automation.enabled && (
+        <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] border border-line bg-bg px-3 py-2.5 text-[12.5px]">
+          <span className={cx('h-1.5 w-1.5 rounded-full', status?.remote ? 'bg-ok live-dot' : status?.remoteError ? 'bg-bad' : 'bg-line-strong')} />
+          <span className={status?.remote ? 'text-fg' : status?.remoteError ? 'text-bad' : 'text-fg-muted'}>
+            {status?.remote
+              ? t('settings.automationRemoteOn', { id: status.remoteDeviceId || '' })
+              : status?.remoteError === 'not_logged_in'
+                ? t('settings.automationRemoteLogin')
+                : status?.remoteError
+                  ? t('settings.automationRemoteError', { error: status.remoteError })
+                  : t('settings.automationRemoteConnecting')}
+          </span>
+          <button className="ml-auto text-fg-muted hover:underline" onClick={() => window.api.app.openExternal(`${saved.apiBaseUrl || 'https://facetbrowser.com'}/account`)}>{t('settings.automationRemoteTokens')}</button>
+        </div>
+      )}
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-[12.5px]">
         <dt className="text-fg-muted">{t('settings.automationDiscovery')}</dt>
         <dd className="font-mono"><button className="hover:underline" onClick={() => status && window.api.app.openPath(status.discoveryFile.replace(/[\\/][^\\/]+$/, ''))}>{status?.discoveryFile}</button></dd>

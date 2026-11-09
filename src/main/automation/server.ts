@@ -11,6 +11,7 @@ import { AutomationError, automation } from './service'
 import { events } from './events'
 import { tools, matchRoute, knownPath, coerceArgs, validateArgs, openapi } from './registry'
 import { mcpHost } from './mcp'
+import { relay } from './relay'
 
 // HTTP + WebSocket front for the AutomationService. Bound to 127.0.0.1 only;
 // every request needs `Authorization: Bearer <token>`; requests that carry an
@@ -42,6 +43,7 @@ class AutomationServer extends EventEmitter {
   constructor() {
     super()
     events.on('event', (ev: AutomationEvent) => this.broadcast(ev))
+    relay.on('status', () => this.emit('status', this.status()))
     mcpHost.configure({ audit: (tool, ids, ms, error) => this.audit(`mcp:${tool}`, ids, ms, error), version: app.getVersion() })
   }
 
@@ -50,7 +52,8 @@ class AutomationServer extends EventEmitter {
   }
 
   status(): AutomationStatus {
-    return { running: !!this.server && this.port !== null, port: this.port, error: this.error, discoveryFile: this.discoveryFile }
+    const r = relay.status()
+    return { running: !!this.server && this.port !== null, port: this.port, error: this.error, discoveryFile: this.discoveryFile, remote: r.connected, remoteError: r.error, remoteDeviceId: r.deviceId }
   }
 
   // Idempotent: called at startup and whenever settings are saved. Restarts
@@ -64,7 +67,11 @@ class AutomationServer extends EventEmitter {
     }
     const same = this.current && this.current.enabled && this.current.port === s.port && this.current.token === s.token && this.server
     this.current = { ...s }
-    if (same) return
+    if (same) {
+      // Only the remote switch (or something irrelevant) changed.
+      relay.apply({ enabled: !!s.remote, port: this.port, token: this.token })
+      return
+    }
     await this.stop()
     this.starting = this.start(s).finally(() => (this.starting = null))
     await this.starting
@@ -116,12 +123,14 @@ class AutomationServer extends EventEmitter {
     this.server = server
     this.wss = wss
     this.writeDiscovery()
+    relay.apply({ enabled: !!s.remote, port: this.port, token: this.token })
     this.emit('status', this.status())
   }
 
   async stop(): Promise<void> {
     const server = this.server
     this.server = null
+    relay.apply({ enabled: false, port: null, token: '' })
     await mcpHost.closeAll().catch(() => {})
     for (const c of this.clients) c.ws.close(1001, 'server stopping')
     this.clients.clear()

@@ -53,7 +53,7 @@ export function defaultSettings(): Settings {
 }
 
 export function defaultAutomation(): AutomationSettings {
-  return { enabled: false, port: 48123, token: newAutomationToken(), exposeCdp: false }
+  return { enabled: false, port: 48123, token: newAutomationToken(), exposeCdp: false, remote: false }
 }
 
 export function newAutomationToken(): string {
@@ -218,8 +218,11 @@ class Store extends EventEmitter {
   // ---- cloud
   get cloud(): CloudState { return this.data.cloud }
   setCloud(patch: Partial<CloudState>): CloudState {
+    const before = this.data.cloud.session
     this.data.cloud = { ...this.data.cloud, ...patch }
     this.scheduleSave()
+    // Signed in / out / tokens refreshed: the relay follows the session.
+    if ('session' in patch && patch.session !== before) this.emit('cloud', this.data.cloud)
     return this.data.cloud
   }
   setCookieSync(profileId: string, v: { localAt: number; serverAt: number }): void {
