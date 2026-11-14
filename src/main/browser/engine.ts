@@ -6,11 +6,13 @@ import { EventEmitter } from 'events'
 import { execFileSync } from 'child_process'
 import os from 'os'
 
-// The FacetBrowser Engine: a fingerprint-chromium build (BSD-3-Clause,
-// github.com/adryfish/fingerprint-chromium) that spoofs canvas, WebGL, audio,
-// fonts, hardware and UA at the C++ level and reports navigator.webdriver=false.
-// Builds are hosted on facetbrowser.com; this module downloads, verifies and
-// extracts them under the user data folder.
+// The FacetBrowser Engine: ungoogled-chromium with the fingerprint-chromium
+// patches (BSD-3-Clause, github.com/adryfish/fingerprint-chromium), which spoof
+// canvas, WebGL, audio, fonts, hardware and UA at the C++ level and report
+// navigator.webdriver=false. Windows builds come from our own fork,
+// github.com/noneym/facetbrowser-engine, which carries the patches forward to
+// current Chromium; macOS still uses upstream's build. This module downloads,
+// verifies and extracts them under the user data folder.
 
 export interface EngineRelease {
   version: string // Chromium version, e.g. 148.0.7778.215
@@ -33,14 +35,15 @@ export interface EngineStatus {
   error: string | null
 }
 
-// Primary URL is the upstream GitHub release (official channel); `mirror` is
+// Primary URL is the GitHub release the build was published in; `mirror` is
 // tried first when set and falls back to the primary on failure.
 export const KNOWN_RELEASES: EngineRelease[] = [
   {
-    version: '148.0.7778.215',
-    file: 'ungoogled-chromium_148.0.7778.215-1.1_windows_x64.zip',
-    url: 'https://github.com/adryfish/fingerprint-chromium/releases/download/148.0.7778.215/ungoogled-chromium_148.0.7778.215-1.1_windows_x64.zip',
-    mirror: 'https://facetbrowser.com/dl/facet-engine-148.0.7778.215-win-x64.zip',
+    // Built from noneym/facetbrowser-engine `main`; no facetbrowser.com mirror yet.
+    version: '157.0.8103.50',
+    file: 'ungoogled-chromium_157.0.8103.50-1.1_windows_x64.zip',
+    url: 'https://github.com/noneym/facetbrowser-engine/releases/download/facet-157.0.8103.50-1/ungoogled-chromium_157.0.8103.50-1.1_windows_x64.zip',
+    sha256: 'a322cabd612032bf02515ea788ee591499b75fca5d54918903db27b48cfa0d43',
     platform: 'win32',
     arch: 'x64'
   },
