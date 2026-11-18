@@ -239,13 +239,15 @@ function EngineSection(): JSX.Element {
       setBusy(false)
     }
   }
-  const updateAvailable = !!(engine?.installed && engine.latest && engine.latest.version !== engine.installedVersion)
+  // A newer build of the same Chromium version is an update too.
+  const buildLabel = (version: string | null, build?: number | null): string => `${version || ''}${build && build > 1 ? `-${build}` : ''}`
+  const updateAvailable = !!(engine?.installed && engine.latest && (engine.latest.version !== engine.installedVersion || (engine.latest.build ?? 1) !== (engine.installedBuild ?? 1)))
   return (
     <Section title={t('engine.title')} hint={t('engine.hint')}>
       {!engine?.supported && <p className="text-[12.5px] text-warn">{t('engine.unsupported')}</p>}
       <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] border border-line bg-bg px-3 py-2.5 text-[12.5px]">
         {engine?.installed ? (
-          <span>{t('engine.installed')}: <span className="font-mono text-fg">{engine.installedVersion}</span>{updateAvailable && <span className="ml-2 text-accent">{t('engine.updateTo', { v: engine.latest!.version })}</span>}</span>
+          <span>{t('engine.installed')}: <span className="font-mono text-fg">{buildLabel(engine.installedVersion, engine.installedBuild)}</span>{updateAvailable && <span className="ml-2 text-accent">{t('engine.updateTo', { v: buildLabel(engine.latest!.version, engine.latest!.build) })}</span>}</span>
         ) : (
           <span className="text-fg-muted">{t('engine.notInstalled')}</span>
         )}

@@ -16,6 +16,7 @@ import os from 'os'
 
 export interface EngineRelease {
   version: string // Chromium version, e.g. 148.0.7778.215
+  build?: number // our build of that Chromium version; 1 when absent
   file: string
   url: string
   mirror?: string
@@ -28,6 +29,7 @@ export interface EngineStatus {
   supported: boolean // Windows x64 and macOS builds exist today
   installed: boolean
   installedVersion: string | null
+  installedBuild: number | null
   exePath: string | null
   latest: EngineRelease | null
   downloading: boolean
@@ -40,10 +42,13 @@ export interface EngineStatus {
 export const KNOWN_RELEASES: EngineRelease[] = [
   {
     // Built from noneym/facetbrowser-engine `main`; no facetbrowser.com mirror yet.
+    // Build 2 adds the screen size, device memory and SOCKS5 authentication
+    // switches (EXTENDED_SWITCHES_SINCE below).
     version: '157.0.8103.50',
+    build: 2,
     file: 'ungoogled-chromium_157.0.8103.50-1.1_windows_x64.zip',
-    url: 'https://github.com/noneym/facetbrowser-engine/releases/download/facet-157.0.8103.50-1/ungoogled-chromium_157.0.8103.50-1.1_windows_x64.zip',
-    sha256: 'a322cabd612032bf02515ea788ee591499b75fca5d54918903db27b48cfa0d43',
+    url: 'https://github.com/noneym/facetbrowser-engine/releases/download/facet-157.0.8103.50-2/ungoogled-chromium_157.0.8103.50-1.1_windows_x64.zip',
+    sha256: '9153052e16b60587767d90bce4fe63c867b3193a2fd9c154a40b4b00fa6a898b',
     platform: 'win32',
     arch: 'x64'
   },
@@ -58,6 +63,24 @@ export const KNOWN_RELEASES: EngineRelease[] = [
     arch: 'arm64'
   }
 ]
+
+// First build per platform whose engine reads --fingerprint-screen-width and
+// -height, --fingerprint-device-memory and SOCKS5 credentials in
+// --proxy-server. A platform that is not listed has no such build yet.
+const EXTENDED_SWITCHES_SINCE: Partial<Record<NodeJS.Platform, { version: string; build: number }>> = {
+  win32: { version: '157.0.8103.50', build: 2 }
+}
+
+interface InstalledEngine {
+  version: string
+  build: number
+  exe: string
+}
+
+// Build 1 lives in <engine>/<version>, later builds in <engine>/<version>-<build>.
+function engineDirName(version: string, build: number): string {
+  return build > 1 ? `${version}-${build}` : version
+}
 
 function platformSupported(): boolean {
   if (process.platform === 'win32') return process.arch === 'x64'
@@ -87,14 +110,27 @@ class EngineManager extends EventEmitter {
     return path.join(app.getPath('userData'), 'engine')
   }
 
-  private findInstalled(): { version: string; exe: string } | null {
+  private findInstalled(): InstalledEngine | null {
     if (!fs.existsSync(this.root)) return null
-    const versions = fs.readdirSync(this.root).filter((d) => /^\d+\.\d+\.\d+\.\d+$/.test(d))
-    const found = versions
-      .map((v) => ({ version: v, exe: findChrome(path.join(this.root, v)) }))
-      .filter((x): x is { version: string; exe: string } => !!x.exe)
-      .sort((a, b) => cmpVer(b.version, a.version))
+    const found: InstalledEngine[] = []
+    for (const dir of fs.readdirSync(this.root)) {
+      const m = dir.match(/^(\d+\.\d+\.\d+\.\d+)(?:-(\d+))?$/)
+      if (!m) continue
+      const exe = findChrome(path.join(this.root, dir))
+      if (exe) found.push({ version: m[1], build: m[2] ? Number(m[2]) : 1, exe })
+    }
+    found.sort((a, b) => cmpVer(b.version, a.version) || b.build - a.build)
     return found[0] || null
+  }
+
+  // True when the installed engine reads the screen size, device memory and
+  // SOCKS5 credential switches. Older engines ignore the first two and refuse
+  // a proxy address that carries credentials.
+  extendedSwitches(): boolean {
+    const since = EXTENDED_SWITCHES_SINCE[process.platform]
+    const inst = this.findInstalled()
+    if (!since || !inst) return false
+    return (cmpVer(inst.version, since.version) || inst.build - since.build) >= 0
   }
 
   latest(): EngineRelease | null {
@@ -109,6 +145,7 @@ class EngineManager extends EventEmitter {
       supported: platformSupported(),
       installed: !!inst,
       installedVersion: inst?.version || null,
+      installedBuild: inst?.build ?? null,
       exePath: inst?.exe || null,
       latest: this.latest(),
       downloading: this.downloading,
@@ -133,7 +170,8 @@ class EngineManager extends EventEmitter {
     this.progress = 0
     this.error = null
     this.emitStatus()
-    const target = path.join(this.root, rel.version)
+    const targetName = engineDirName(rel.version, rel.build ?? 1)
+    const target = path.join(this.root, targetName)
     const tmpZip = path.join(this.root, `${rel.file}.part`)
     try {
       fs.mkdirSync(this.root, { recursive: true })
@@ -177,6 +215,17 @@ class EngineManager extends EventEmitter {
       else await extractZip(tmpZip, target)
       fs.unlinkSync(tmpZip)
       if (!findChrome(target)) throw new Error(process.platform === 'darwin' ? 'Disk image did not contain a Chromium app' : 'Archive did not contain chrome.exe')
+      // Older engines are no longer used once this one is in place. The
+      // rename fails while a running profile holds one open, which leaves it
+      // whole for that browser; it is removed by a later install.
+      for (const dir of fs.readdirSync(this.root)) {
+        if (dir === targetName || !/^\d+\.\d+\.\d+\.\d+(-\d+)?$/.test(dir)) continue
+        const stale = path.join(this.root, `${dir}.stale`)
+        try {
+          fs.renameSync(path.join(this.root, dir), stale)
+          fs.rmSync(stale, { recursive: true, force: true })
+        } catch { /* in use */ }
+      }
       this.progress = 1
       return this.status()
     } catch (e) {

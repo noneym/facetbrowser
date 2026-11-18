@@ -105,7 +105,11 @@ function writeProfilePrefs(userDataDir: string, languages: string[], pinExtensio
 
 // fingerprint-chromium flags. The seed derives canvas, WebGL, audio and font
 // noise plus GPU as one coherent identity; the rest comes from the profile.
-export function engineArgs(profile: Profile, timezoneId?: string): string[] {
+// `extended` adds the switches that only newer engine builds read
+// (engine.extendedSwitches()): the screen size pages see and the device
+// memory, which those builds would otherwise take from the real machine and
+// from the seed.
+export function engineArgs(profile: Profile, timezoneId?: string, extended = false): string[] {
   const fp = profile.fingerprint
   const platform = fp.os === 'macos' ? 'macos' : fp.os === 'linux' ? 'linux' : 'windows'
   const args = [
@@ -117,9 +121,32 @@ export function engineArgs(profile: Profile, timezoneId?: string): string[] {
     `--lang=${fp.locale}`
   ]
   if (timezoneId) args.push(`--timezone=${timezoneId}`)
+  if (extended) {
+    const { width, height } = fp.screen
+    if (Number.isInteger(width) && Number.isInteger(height) && width >= 320 && height >= 240) {
+      args.push(`--fingerprint-screen-width=${width}`, `--fingerprint-screen-height=${height}`)
+    }
+    if ([2, 4, 8, 16, 32].includes(fp.deviceMemory)) args.push(`--fingerprint-device-memory=${fp.deviceMemory}`)
+  }
   const off = [fp.canvas === 'real' && 'canvas', fp.webgl.mode === 'real' && 'gpu', fp.audio === 'real' && 'audio', fp.clientRects === 'real' && 'clientrects', fp.fonts === 'real' && 'font'].filter(Boolean)
   if (off.length) args.push(`--disable-spoofing=${off.join(',')}`)
   return args
+}
+
+// --proxy-server value for a SOCKS5 proxy the engine can reach by itself,
+// credentials included (engine.extendedSwitches() builds only), or null when
+// the proxy has to go through the local bridge. The engine wants the
+// credentials percent-encoded and accepts at most 255 bytes for each.
+export function nativeSocks5Arg(proxy: ProxyConfig): string | null {
+  if (proxy.protocol !== 'socks5') return null
+  // IPv6 literals are not tested in the engine's credential lookup.
+  if (proxy.host.includes(':')) return null
+  const user = proxy.username || ''
+  const pass = proxy.password || ''
+  if (!user && pass) return null
+  if (Buffer.byteLength(user) > 255 || Buffer.byteLength(pass) > 255) return null
+  const auth = user ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@` : ''
+  return `socks5://${auth}${proxy.host}:${proxy.port}`
 }
 
 class Launcher extends EventEmitter {
@@ -179,8 +206,13 @@ class Launcher extends EventEmitter {
     const dir = this.userDataDir(profile, settings)
     fs.mkdirSync(dir, { recursive: true })
 
+    // A SOCKS5 proxy is handed to the engine itself when the installed build
+    // can authenticate to it. Everything else goes through the local bridge,
+    // which does HTTP proxy authentication and SOCKS4 for the engine.
+    const extended = engine.extendedSwitches()
+    const directProxy = proxy && extended ? nativeSocks5Arg(proxy) : null
     let bridge: Bridge | null = null
-    if (proxy) bridge = await startBridge(proxy)
+    if (proxy && !directProxy) bridge = await startBridge(proxy)
 
     const placeholder: Running = { context: null as unknown as BrowserContext, bridge, startedAt: Date.now(), state: 'starting', origins: new Set(), tabs: new Map(), tabSnapshot: [], tabTimer: null }
     this.running.set(profile.id, placeholder)
@@ -210,17 +242,17 @@ class Launcher extends EventEmitter {
         '--disable-session-crashed-bubble',
         '--hide-crash-restore-bubble',
         `--window-size=${Math.min(fp.screen.width, 1600)},${Math.min(fp.screen.height, 1000)}`,
-        ...engineArgs(profile, timezoneId)
+        ...engineArgs(profile, timezoneId, extended)
       ]
       if (input.exposeCdp) args.push('--remote-debugging-port=0')
-      if (bridge) {
-        args.push(`--proxy-server=http://127.0.0.1:${bridge.port}`)
+      if (directProxy || bridge) {
+        args.push(`--proxy-server=${directProxy || `http://127.0.0.1:${bridge!.port}`}`)
         args.push('--proxy-bypass-list=<-loopback>')
       }
       // WebRTC is handled by Chromium's own IP-handling policy, not by patching
       // RTCPeerConnection. Behind a proxy UDP would bypass it and leak the real
       // address, so anything but 'real' disables non-proxied UDP there.
-      const rtcPolicy = fp.webrtc === 'real' ? 'default' : bridge || fp.webrtc === 'disabled' ? 'disable_non_proxied_udp' : 'default_public_interface_only'
+      const rtcPolicy = fp.webrtc === 'real' ? 'default' : proxy || fp.webrtc === 'disabled' ? 'disable_non_proxied_udp' : 'default_public_interface_only'
       args.push(`--force-webrtc-ip-handling-policy=${rtcPolicy}`)
       const extensions = [...new Set([...profile.extensions, ...(input.extensionDirs || [])])].filter((e) => e && fs.existsSync(e))
       if (extensions.length) {
@@ -382,7 +414,7 @@ class Launcher extends EventEmitter {
       executablePath: exe,
       headless: true,
       chromiumSandbox: true,
-      args: ['--no-first-run', '--no-default-browser-check', ...engineArgs(profile)],
+      args: ['--no-first-run', '--no-default-browser-check', ...engineArgs(profile, undefined, engine.extendedSwitches())],
       ignoreDefaultArgs: ['--enable-automation'],
       serviceWorkers: 'block'
     })

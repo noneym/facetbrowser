@@ -6,8 +6,10 @@ import type { ProxyConfig } from '@shared/types'
 // Local forwarding proxy. Chromium is pointed at 127.0.0.1:<port> with no
 // credentials, and this bridge opens the real upstream connection (HTTP
 // CONNECT or SOCKS4/5 with authentication). This keeps credentials out of
-// the browser, gives SOCKS5-with-auth support (Chromium has none) and lets us
-// count traffic per profile.
+// the browser, gives SOCKS5-with-auth support to engine builds that have none
+// and lets us count traffic per profile. Engine builds that authenticate to
+// SOCKS5 themselves skip the bridge for those proxies (nativeSocks5Arg in
+// browser/launcher.ts).
 
 export interface Bridge {
   port: number
