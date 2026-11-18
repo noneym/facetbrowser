@@ -502,6 +502,16 @@ const SEARCH_MARKER = 'facet-search-engine'
 
 // Kept as a string: it runs inside chrome://settings, where the WebUI module
 // and chrome.send exist, and must not be touched by the bundler.
+//
+// The handler CHECKs its arguments, so a wrong one crashes the whole browser,
+// and the messages changed between Chromium 148 and 157. Each form below was
+// tried against both engines:
+// - engine ids were numbers and are now strings ("db:7"); a new engine is
+//   started with 0 on 148 and with null on 157.
+// - searchEngineEditCompleted takes name, keyword, URL and a suggestions URL.
+//   The fourth is ungoogled-chromium's own field; stock Chromium takes three.
+// - the second argument of setDefaultSearchEngine names the settings page the
+//   choice was made on. 148 accepts 0 and 1, 157 accepts 1 and 2, so 1 it is.
 const SET_GOOGLE_DEFAULT = `(async () => {
   const cr = await import('chrome://resources/js/cr.js')
   const list = async () => {
@@ -509,11 +519,13 @@ const SET_GOOGLE_DEFAULT = `(async () => {
     return [...l.defaults, ...l.actives, ...l.others]
   }
   const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-  const current = (await list()).find((e) => e.default)
+  const engines = await list()
+  const current = engines.find((e) => e.default)
   if (current && current.keyword !== 'nosearch') return true
-  let google = (await list()).find((e) => e.keyword === 'google.com')
+  const stringIds = engines.some((e) => typeof e.id === 'string')
+  let google = engines.find((e) => e.keyword === 'google.com')
   if (!google) {
-    chrome.send('searchEngineEditStarted', [0])
+    chrome.send('searchEngineEditStarted', [stringIds ? null : 0])
     chrome.send('searchEngineEditCompleted', ['Google', 'google.com', 'https://www.google.com/search?q=%s', 'https://www.google.com/complete/search?client=chrome&q=%s'])
     for (let i = 0; i < 20 && !google; i++) {
       await wait(100)
@@ -521,7 +533,7 @@ const SET_GOOGLE_DEFAULT = `(async () => {
     }
   }
   if (!google) return false
-  chrome.send('setDefaultSearchEngine', [google.id, 0, false])
+  chrome.send('setDefaultSearchEngine', [google.id, 1, false])
   for (let i = 0; i < 20; i++) {
     await wait(100)
     if ((await list()).find((e) => e.default)?.keyword === 'google.com') return true
