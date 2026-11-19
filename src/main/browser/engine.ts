@@ -9,10 +9,10 @@ import os from 'os'
 // The FacetBrowser Engine: ungoogled-chromium with the fingerprint-chromium
 // patches (BSD-3-Clause, github.com/adryfish/fingerprint-chromium), which spoof
 // canvas, WebGL, audio, fonts, hardware and UA at the C++ level and report
-// navigator.webdriver=false. Windows builds come from our own fork,
+// navigator.webdriver=false. The builds come from our own fork,
 // github.com/noneym/facetbrowser-engine, which carries the patches forward to
-// current Chromium; macOS still uses upstream's build. This module downloads,
-// verifies and extracts them under the user data folder.
+// current Chromium. This module downloads, verifies and extracts them under
+// the user data folder.
 
 export interface EngineRelease {
   version: string // Chromium version, e.g. 148.0.7778.215
@@ -53,12 +53,16 @@ export const KNOWN_RELEASES: EngineRelease[] = [
     arch: 'x64'
   },
   {
-    // Upstream ships one macOS disk image per version, an arm64 binary, so
-    // only Apple Silicon Macs are supported (verified with the Mach-O header).
-    version: '148.0.7778.215',
-    file: 'ungoogled-chromium_148.0.7778.215-1.1_macos.dmg',
-    url: 'https://github.com/adryfish/fingerprint-chromium/releases/download/148.0.7778.215/ungoogled-chromium_148.0.7778.215-1.1_macos.dmg',
-    mirror: 'https://facetbrowser.com/dl/facet-engine-148.0.7778.215-mac.dmg',
+    // The macOS disk image is built for arm64 only, so only Apple Silicon
+    // Macs are supported. Build 3 is the first macOS build of 157 that
+    // FacetBrowser uses; it has the same switches as build 2 on Windows. The
+    // file name is the one the 157 release before it used for another image,
+    // so the checksum is what tells them apart.
+    version: '157.0.8103.50',
+    build: 3,
+    file: 'ungoogled-chromium_157.0.8103.50-1.1_arm64-macos.dmg',
+    url: 'https://github.com/noneym/facetbrowser-engine/releases/download/facet-157.0.8103.50-3/ungoogled-chromium_157.0.8103.50-1.1_arm64-macos.dmg',
+    sha256: 'bc7aa63d857ddc44c7ffbc18cd47c70241a8d14d885e9da40d083c38d6640bec',
     platform: 'darwin',
     arch: 'arm64'
   }
@@ -68,7 +72,8 @@ export const KNOWN_RELEASES: EngineRelease[] = [
 // -height, --fingerprint-device-memory and SOCKS5 credentials in
 // --proxy-server. A platform that is not listed has no such build yet.
 const EXTENDED_SWITCHES_SINCE: Partial<Record<NodeJS.Platform, { version: string; build: number }>> = {
-  win32: { version: '157.0.8103.50', build: 2 }
+  win32: { version: '157.0.8103.50', build: 2 },
+  darwin: { version: '157.0.8103.50', build: 3 }
 }
 
 interface InstalledEngine {
